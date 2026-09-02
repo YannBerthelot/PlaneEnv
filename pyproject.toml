@@ -35,9 +35,16 @@ dependencies = [
     # ``step_env`` returns natural termination alone, leaving the time limit to
     # gymnax's six-value step API.
     "gymnax>=1.0.0",
-    # Upper bound tracks gymnax: released gymnax 1.0.0 caps gymnasium at <1.2,
-    # so a resolver will pick 1.1.x there. gymnax PR #117 raises that to <1.4;
-    # once it ships in a release this window applies as written.
+    # gymnax 1.0.0 caps gymnasium at <1.2, so a resolver picks 1.1.x here, and
+    # that is what the suite is tested against. The window stays open to <1.4
+    # because gymnax PR #117 raises its own cap there; when that ships, a
+    # resolver may pick a newer gymnasium and nothing in this project objects.
+    #
+    # This used to be a git dependency on gymnax main, on the reasoning that the
+    # released cap "conflicts with newer gymnasium". Nothing here needs newer
+    # gymnasium: the whole suite, fast and slow, passes on gymnax 1.0.0 with
+    # gymnasium 1.1.1 from PyPI alone. The pin cost reproducibility to buy
+    # nothing, so it is gone.
     "gymnasium>=1.1,<1.4",
     "jax>=0.6.2",
     "flax>=0.10",
@@ -99,20 +106,7 @@ dev = [
     "pre-commit>=3.5.0",
 ]
 
-# TEMPORARY: released gymnax 1.0.0 pins gymnasium<1.2, which conflicts with
-# newer gymnasium. PR #117 relaxing that to <1.4 is now MERGED into gymnax
-# main, but no release carries it yet -- PyPI's latest is still 1.0.0 with the
-# old pin. So this tracks upstream main rather than a fork, which is a strictly
-# better position but still a git dependency.
-#
-# This table is dev-only metadata — uv strips it from the published wheel, so
-# installers of target-gym still see the plain ``gymnax>=1.0.0`` requirement.
-# The cost is that the *tested* configuration cannot be reproduced from PyPI
-# alone, which is why 1.0 should wait for the release.
-#
-# REMOVE once gymnax > 1.0.0 is on PyPI, then bump the floor above to it.
 [tool.uv.sources]
-gymnax = { git = "https://github.com/RobertTLange/gymnax", branch = "main" }
 
 # stable-baselines3 (dev-only, one PPO smoke test) pulls torch, and torch's
 # default Linux wheel drags in the whole CUDA runtime -- several GB of

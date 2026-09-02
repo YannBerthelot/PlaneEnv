@@ -453,9 +453,15 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       versioned URL, built and deployed from the same workflow that tests it.
 * [ ] **Publish RL baseline results.** The environments claim a learned policy
       has something real to beat; no learned policy's numbers are published yet.
-* [ ] **Drop the git dependency on `gymnax`.** The tested configuration pins
-      upstream `main` because the gymnasium bound this project needs is merged
-      but unreleased, so that configuration cannot be reproduced from PyPI alone.
+* [x] **Drop the git dependency on `gymnax`.** Gone, and it turned out not to be
+      needed. The pin tracked upstream `main` on the reasoning that released
+      gymnax 1.0.0 caps `gymnasium<1.2` and that "conflicts with newer
+      gymnasium" -- but nothing in this project requires newer gymnasium. It
+      declares `gymnasium>=1.1,<1.4`, and 1.1.1 satisfies that. Resolving from
+      PyPI alone gives gymnax 1.0.0 with gymnasium 1.1.1, on which the whole
+      suite passes unchanged: 1225 fast, 69 slow, same four and two xfails.
+      The tested configuration is now reproducible from PyPI, which was the
+      point. `uv.lock` carries no git dependencies at all.
 * [x] **A performance phase.** Four defects, all paid by every user and none
       visible to a throughput benchmark, which measures steady state after
       compilation. Every environment returned a *weakly typed* reset state, so

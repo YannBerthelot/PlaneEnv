@@ -505,10 +505,8 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
 * [ ] **Apply the model review checklist to the other environments.** The
       aircraft work produced twelve checks in
       [docs/model-review-checklist.md](docs/model-review-checklist.md), derived
-      from real defects rather than from good intentions. Checks 1-4 and 9-12
-      have now been run across all eighteen; **checks 5, 7 and 8 have not**, and
-      they are the expensive ones -- each needs a regime seam, a conserved
-      quantity or an actuator authority identified per plant.
+      from real defects rather than from good intentions. All twelve have now
+      been run across all eighteen environments.
 
       The pass so far: check 3 found two write-only state fields a hand review
       had missed; check 9 found the bank-commanded loop gain varies 2.38x on the
@@ -520,6 +518,17 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       half of a long-standing strict xfail. Check 12 exists because the first
       version of that fix edited one of *three* copies of the same control law
       and measurably did nothing.
+
+      Checks 5, 7 and 8 each needed a plant-agnostic form to be run at all, and
+      each needed its first metric discarded. Check 5 is now done by autodiff:
+      comparing the two one-sided Jacobians of a step tells a kink from a steep
+      curve, which comparing sample-to-sample steps cannot -- that ranked
+      Arrhenius above every real seam. Check 7 became an unforced run, with
+      linear growth separated from accelerating growth so that an aircraft is
+      not flagged for flying forwards. Both come back clean: no plant produces
+      energy from its own equations, and the only seams that survive refinement
+      are a mass clamped at zero, a power limit binding, and one in the aircraft
+      at 308 m/s that full actuator travel cannot reach.
 * [x] **A reward-shaping phase.** The rewards had been written per environment as
       each was added, and the conventions had drifted -- Gaussian versus
       quadratic tracking terms, differing crash penalties, differing treatment

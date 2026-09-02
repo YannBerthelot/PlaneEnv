@@ -91,6 +91,58 @@ defect infinity.
 laminar and turbulent, charging and discharging, calcining and inert, boiling
 and single-phase. Most of these environments have such a seam.
 
+**Do this with autodiff, not finite differences.** The prescription above --
+"measure the largest step against the typical step" -- cannot tell a kink from a
+steep curve, and run across all eighteen it ranked the cstr first at a ratio of
+8.5e18. That is not a discontinuity, it is Arrhenius: the metric flags any
+function whose derivative *grows*, and an exponential does that perfectly
+smoothly.
+
+Every plant here is differentiable, so ask the dynamics instead of sampling
+them. At a point `x`, take the exact Jacobian of one step just below and just
+above it:
+
+    jump(x) = |J(x+eps) - J(x-eps)| / (|J(x+eps)| + |J(x-eps)|)
+
+For *any* smooth function, however steep, the two one-sided derivatives converge
+to the same value and `jump` falls to zero with `eps`. Across a genuine kink
+they converge to different values and `jump` holds. It is scale-free, so a plant
+whose derivative spans twenty orders of magnitude is not penalised for having
+one; and `jnp.where` switches are caught precisely *because* autodiff returns
+the selected branch's derivative. The thing that makes autodiff "wrong" at a
+seam is what makes it a detector for one. Shrinking `eps` by 4x settles each
+case: a smooth point decays with it, a seam does not.
+
+Two filters make the output readable. Score only where the increment is real --
+where a field is unaffected by the swept variable, both derivatives are float
+noise and their ratio is meaningless. And require *both* one-sided derivatives
+to be active: where one is exactly zero the ratio is 1 by construction, and that
+is a **saturation**, a clip on an action or a rate, not two physical
+descriptions failing to join. Every environment clips something, so scoring
+those buries what the check is for.
+
+**What it finds here.** Nine candidates across eighteen environments, and most
+are benign:
+
+| environment | seam | `jump` | held under refinement |
+| --- | --- | --- | --- |
+| aircraft (all four) | `x_dot` near 308 m/s | 1.00 | yes |
+| `battery` | `soc` near 0.115 | 1.00 | yes |
+| `reactor` | `T_fuel` near 718 K | 0.89 | yes |
+| `glass_furnace` | `T_crown` near 1527 K | 0.17 | yes |
+| `boiler_drum` | `pressure` | 0.20 | **no** (0.45) -- smooth |
+| `wind_turbine` | `v_wind` | 0.12 | **no** (0.54) -- smooth |
+
+The furnace's is `m_batch = jnp.maximum(position[3], 0.0)`, the batch blanket
+running out -- a mass that cannot go negative, which is a legitimate kink. The
+battery's is its state-of-charge-dependent power limit binding. The boiler drum
+and wind turbine decay under refinement and are simply steep.
+
+The aircraft's is the one that needed checking, and it is **outside the
+reachable state space**: it sits at 308 m/s, and holding every actuator hard
+over from cruise reaches 251.5 m/s on the 2D aircraft and 285.8 m/s on the 3D
+one before the episode ends. A sustained dive is the case this does not cover.
+
 ## 6. Is the model still physical where an optimiser can drive it?
 
 **What went wrong.** Every drag test probed attached flow, where `CD` is
@@ -118,6 +170,26 @@ and tests the integrator rather than the physics.
 conserved quantity — charge for the battery, enthalpy for the thermal plants,
 neutrons for the reactor.
 
+**How to run it without naming each plant's energy.** Hold the actuator at zero
+and let the plant run. With nothing being supplied, nothing may grow without
+bound; anything that does is producing energy from its own equations, which is
+the class of defect that let a departed aircraft fall at 300 m/s against an
+implied terminal velocity of 767.
+
+The trap is that growth alone proves nothing. The first run of this flagged all
+four aircraft, because position grows -- the aircraft flies forward -- and
+flagged the battery, because cumulative capacity fade counts upward. Both are
+integrators, not instabilities. What separates them is whether the growth is
+linear or accelerating: compare the mean increment over the last fifth of the
+run against the first. An integrator holds near 1; an unstable mode runs away.
+
+**What it finds here.** Nothing, which is the answer worth having. Over 3000
+unforced steps no environment accelerates: the largest is the glass furnace's
+`T_work` at 3.25x and the circle task's `psi` at 2.40x, both far below anything
+suggesting an unbounded mode, and the rest sit near 1. Five plants are driven by
+an exogenous input -- wind, dispatch, weather, a manoeuvring lead -- and are not
+unforced even at zero action, so they are marked rather than scored.
+
 ## 8. Is actuator authority validated, or merely plausible?
 
 **What went wrong.** The aileron moment applied the *wing's* lift-curve slope to
@@ -131,6 +203,34 @@ a published figure.
 
 **What it applies to.** Valve authority, heater duty, pump head, rod worth —
 any actuator whose gain was written down rather than derived.
+
+**The plant-agnostic form** is a time constant. Hold the actuator hard over from
+reset and measure how far it drives the tracked variable and whether it destroys
+the plant. Both tails are suspicious: an actuator that can trip the plant in a
+few steps leaves the episode decided before the controller has acted, and one
+that cannot move it is decorative.
+
+**What it finds here.** No environment is inert -- every actuator moves its
+tracked variable -- but the margin varies by three orders of magnitude, and two
+plants are startlingly twitchy:
+
+| environment | steps to trip at full travel | in seconds |
+| --- | --- | --- |
+| `boiler_drum` | **3** | 6 s |
+| `wind_turbine` | 11 | 2.75 s |
+| aircraft (3D) | 27 | 27 s |
+| `hvac` | 56 | 14 h |
+| `distillation` | 231 | 231 s |
+| `glass_furnace` | 3162 | 53 min |
+| `cstr`, `first_order`, `ph_neutralization` | never | -- |
+
+The boiler drum trips on `|level| >= 0.25 m` at `dt = 2 s`, so a saturated
+feedwater valve destroys it in six seconds out of a 400-step episode. That is
+not obviously wrong -- drum shrink-and-swell really is that fast, and the drum
+is meant to be one of the hardest environments here -- but it does mean a
+controller that saturates has already lost, which is worth knowing before
+reading a poor score as a tuning problem. The three plants that cannot be
+tripped at all are the three simplest, as expected.
 
 ## 9. Does a control loop's gain depend on an operating variable?
 
@@ -309,8 +409,22 @@ is.
   Checks 3 and 4 have now been run as scripts and take seconds; the argument for
   promoting them is that this pass found two write-only fields the previous
   hand-review had missed.
-- **Checks 5, 7 and 8 have still not been run** against the other seventeen
-  environments. They are the expensive ones — each needs a regime seam, a
-  conserved quantity or an actuator authority identified per plant — and each is
-  the kind of thing that found real defects in the aircraft. They are the
-  natural next pass.
+- ~~Checks 5, 7 and 8 have still not been run against the other seventeen
+  environments.~~ Run. All twelve checks have now been applied to all eighteen.
+  Each turned out to have a plant-agnostic form needing no per-plant seam,
+  conserved quantity or actuator figure identified by hand -- autodiff for 5, an
+  unforced run for 7, a hard-over actuator for 8 -- which is why they were
+  cheaper than they looked, and why they should be re-run whenever the dynamics
+  change rather than treated as a one-off audit.
+- **Each of checks 5, 7 and 8 needed its first metric thrown away.** Largest
+  step against typical step ranked Arrhenius above every real seam; growth under
+  zero input flagged four aircraft for flying forwards; and the actuator scan
+  needed the tracked index the runners already use rather than a guess at which
+  state field is the output. In all three the fix was to ask what distinguishes
+  the defect from the benign thing that resembles it -- a kink from a steep
+  curve, an instability from an integrator -- rather than to raise a threshold.
+  A check whose output is a long list is usually measuring the wrong quantity.
+- The seams checks 5 and 8 flagged are recorded but **not resolved**: the
+  aircraft's is outside the reachable envelope only for level flight, and the
+  boiler drum's six-second trip is plausible but unverified against a real drum.
+  Both want a source rather than an argument.

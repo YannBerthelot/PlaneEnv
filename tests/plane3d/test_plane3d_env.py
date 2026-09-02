@@ -628,30 +628,30 @@ class TestLemniscateDistanceResolution:
             ), f"{offset} m vertical offset measured as {dist:.3f} m"
 
 
-_PATH_FOLLOWING_XFAIL = (
-    "The path guidance laws do not hold their path. Over three laps the circle "
-    "expert wanders 640-1670 m from an 8.4 km circle without ever settling, and "
-    "the figure-8 expert is 6-12 km from a curve whose lobes are 8.4 km across, "
-    "i.e. not following it at all. Their altitude loops are fine (0.2-1.5 m), "
-    "which is what the tuning runs measured; the cross-track error was never "
-    "measured. Nothing else sees this: every other test runs the 200-step "
-    "episode from EnvSpec.test_params, which is 200 s against a 264 s lap, and "
-    "the aircraft is initialised exactly on the path -- so a controller that "
-    "simply flies straight ahead looks correct for the whole episode. This is a "
-    "guidance-law fault, not a gains fault (see docs/model-review-checklist.md "
-    "check 10), and is tracked as an open item there."
+_FIGURE8_PATH_XFAIL = (
+    "The figure-8 expert does not hold its curve: over three laps it settles "
+    "1.3-2.7 km from a lemniscate whose lobes are 8.4 km across. Its altitude "
+    "loop is fine, which is what the tuning runs measured; the cross-track "
+    "error was never measured. Nothing else sees this: every other test runs "
+    "the 200-step episode from EnvSpec.test_params, which is 200 s against a "
+    "264 s lap, and the aircraft starts exactly on the path -- so a controller "
+    "that simply flies straight ahead looks correct for the whole episode. "
+    "The circle half of this was a *feasibility* fault and is now fixed (see "
+    "docs/model-review-checklist.md check 9); the same treatment was tried here "
+    "and measured worse, so speed is not the binding constraint on this curve "
+    "and the guidance law itself remains the open question."
 )
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True, reason=_PATH_FOLLOWING_XFAIL)
 @pytest.mark.parametrize(
     "make_env, error_fn",
     [
         (Plane3DCircle, lambda s, p: abs(float(distance_to_circle(s)))),
-        (
+        pytest.param(
             Plane3DFigureEight,
             lambda s, p: float(nearest_point_on_twisted_lemniscate(s, p)[3]),
+            marks=pytest.mark.xfail(strict=True, reason=_FIGURE8_PATH_XFAIL),
         ),
     ],
     ids=["circle", "figure8"],

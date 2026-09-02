@@ -57,6 +57,14 @@ Two caveats worth knowing before you re-tune anything:
   is not automatically better than what is shipped. Measure both before keeping
   one: re-running the tuner over the whole registry produced a genuinely better
   `cstr` and a distinctly worse `first_order` in the same pass.
+- **A tuned gain cannot rescue an infeasible task.** The circle expert's radial
+  gains were searched to convergence against a task that, on a third of its own
+  radius range, no gain could fly: holding 230 m/s around an 8.4 km circle needs
+  33.8 deg of bank against a 30 deg limit, so the aircraft sat pinned at the
+  limit for the whole episode. Giving it the airspeed the radius admits was
+  worth 31% of the return, against nothing at all from further tuning. Check
+  feasibility before searching gains.
+
 - **Check the winner is not the last point in the grid.** The glass furnace's
   search is a grid over (Kp, Ki, Kd), and it returned `Kp=0.040` -- the largest
   value in `kp_grid`, with the score rising monotonically across the entire Kp
@@ -232,7 +240,7 @@ directions, and either one alone would misreport the pair.
 | --- | --- | --- | --- |
 | plane3d_figure8 | **+450.8** | +449.6 | 10/10 |
 | plane3d_heading | **+236.9** | +314.1 | 8/10 |
-| plane3d_circle | +195.8 | +202.9 | 8/10 |
+| plane3d_circle | +145.1 | +200.1 | 6/10 |
 | four_tank | +56.9 | +64.6 | 10/10 |
 | boiler_drum | +51.4 | +54.9 | 10/10 |
 | plane | +33.8 | +30.2 | 8/10 |
@@ -267,8 +275,15 @@ flip is the point of tuning the baseline honestly in the first place.
 The aircraft rows now carry win counts. The previous table quoted their margins
 as a difference of means with no per-seed count, because the PID column had been
 re-tuned while the MPC column had not, and re-running the MPC cost hours. Both
-columns are current here, so the counts are real: the MPC leads on all four, on
-8 of 10 seeds for three of them and 10 of 10 for the figure-8.
+columns are current here, so the counts are real: the MPC leads on all four.
+
+The circle row moved after the table was first measured, and not because of the
+MPC, which is unchanged at 361.23. Its PID gained 31% -- 165.5 to 216.1 -- when
+the expert was given the ability to trade speed for turn radius, without which a
+third of the task's own radius range is unflyable at the cruise it holds (check 9
+in the model review checklist). A stronger baseline narrows the MPC's lead from
++195.8 to +145.1 and its win count from 8 of 10 to 6, which is what a better
+opponent is supposed to do.
 
 **The aircraft rows are the second measurement.** On the previous dynamics the
 2D plane scored -171 and the 3D heading task -34, each winning most seeds and

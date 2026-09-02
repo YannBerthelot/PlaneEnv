@@ -51,10 +51,14 @@ there until fuel burn made mass load-bearing.
 **How to check.** For each `*State` dataclass, count attribute reads of each
 field across the package. Automatable in about fifteen lines.
 
-**What it finds here.** Two fields are written and never read — `hvac.T_surface`
-and `glass_furnace.T_stack`. Both are documented as algebraic or diagnostic, so
-neither is a defect. The check is still worth keeping: it is cheap, and the one
-time it mattered it would have caught a 20-tonne error.
+**What it finds here.** Four fields, once the scan was actually run rather than
+eyeballed: `hvac.T_surface`, `glass_furnace.T_stack`, `hvac.Q_command` and
+`wind_turbine.torque_cmd`. All four are benign, and the last two in an
+instructive way — the *local* variable of that name carries the value into the
+dynamics, and the state field is only a record of what was commanded. So the
+scan's hit rate is poor and its cost is a few seconds; keep it, but read every
+hit before believing it. The one time it mattered it would have caught a
+20-tonne error.
 
 ## 4. Is any state discarded where it is unpacked?
 
@@ -65,8 +69,11 @@ aircraft had no pitch damping and a departed airframe tumbled indefinitely.
 **How to check.** `grep` for `_` in tuple unpacking of state vectors, then ask
 whether the physics genuinely does not depend on it.
 
-**What it finds here.** Only position components (`x`, `y`), which the dynamics
-correctly do not depend on. No remaining rate is discarded.
+**What it finds here.** Three sites across the package, and all three are
+correct: `x` in the 2D dynamics, `x` and `y` in the 3D dynamics — which the
+equations of motion genuinely do not depend on — and a `lax.scan` carry in
+`utils.py`. No rate is discarded anywhere. Now verified mechanically rather
+than by reading.
 
 ## 5. Do the regimes join?
 
@@ -139,6 +146,59 @@ or load.
 **What it applies to.** Any cascade. Gain-scheduled controllers are already
 acknowledging this; the ones that are not scheduled are the ones to look at.
 
+**What it finds here.** The other three aircraft lateral loops still command
+bank, so the defect is present in all of them. Measuring the speeds each task
+actually flies puts a number on it: heading and circle range 201-244 m/s for a
+1.22x gain swing, and the figure-8 ranges 96-228 m/s for **2.38x** — larger than
+the 45% swing that was judged worth fixing on patrol.
+
+**And converting them changed nothing.** Applying patrol's exact fix to all
+three — command a turn rate, invert `g*tan(phi)/V`, clip the rate rather than
+the bank — moved the three-lap path error by less than 1% and the ten-seed
+returns by less than the seed noise (heading -1.7, circle +0.1, figure-8 +0.9,
+patrol -1.6, against standard deviations of 14-76). It was reverted, on the same
+grounds the aircraft's stall-margin barrier was: a change that measures as
+nothing does not earn its complexity, and here it would have been *five* copies
+of it (see check 12).
+
+That is worth recording as a result rather than quietly dropping, because the
+check is still correct. A 2.38x gain swing is real and would matter to anyone
+re-tuning these loops or training against them. It simply was not what was
+holding the path — which is the lesson of check 10 arriving a second time, and
+this time it was *me* reaching for the nearest plausible structural candidate.
+
+**What was actually wrong with the circle is one line of geometry.** A level
+coordinated turn needs `tan(phi) = V^2/(g R)`. The task samples its radius from
+`target_radius_range = (8000, 12000)` m while the autopilot holds a 230 m/s
+cruise and the bank limit is 30 deg — and the smallest radius that combination
+can fly is **9.34 km**, rising to 10.5 km at the top of the speed band. So a
+third to a half of the environment's own parameter range is unflyable at cruise:
+
+| seed | radius | speed | bank needed | pinned at limit | settled error |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 8.42 km | 235 m/s | **33.8 deg** | **100%** of the episode | 1860 m |
+| 1 | 11.31 km | 230 m/s | 25.5 deg | 0% | 31 m |
+| 2 | 11.46 km | 230 m/s | 25.1 deg | 0% | 52 m |
+
+No guidance law can fix that, and the coin-flip-on-seed signature was check 10
+pointing at a saturation boundary exactly as it says it does. The aircraft can
+fly an 8 km circle — it just has to slow to 213 m/s first, and nothing told it
+to. The circle law now publishes the speed its radius admits and the shared
+airspeed channel holds it, which takes the failing seed from **1860 m to 73 m**
+and lets the strict xfail be narrowed to the figure-8 alone.
+
+**The same treatment made the figure-8 worse, which is the more interesting
+half.** Its lemniscate has a minimum radius of curvature of `a/3`, so at the
+shipped 8.4 km lobe radius the lobes admit only 114 m/s — and on a fixed
+throttle the aircraft arrives at them having accelerated to 228 m/s. The defect
+is real and quantified. But holding one speed for the whole curve took the
+three-lap error from 1779 m to 2824 m, and scheduling it against local curvature
+(differentiating the observed tangent heading with respect to distance
+travelled) still gave 2098 m. Both were reverted. Speed is *not* the binding
+constraint on that curve, so its guidance law is still the open question — now
+narrowed by having ruled out the integrator, the loop-gain scheduling and the
+speed schedule.
+
 ## 10. What does the tuning objective's behaviour tell you?
 
 **What went wrong.** A gain search on the patrol follower was chaotic — a 0.1 %
@@ -146,6 +206,12 @@ change in one gain moved the objective by a factor of two — and a "best" point
 found in one run scored 2.6x worse when re-evaluated. That was not noise to be
 averaged away: it was the search finding which side of a *saturation* boundary
 each seed fell on.
+
+**What it finds here.** Its own advice, applied to the path-following xfail,
+cleared the integrator immediately: the circle's three-lap error is identical to
+four significant figures at `rk4_2`, `rk4_4` and `rk4_8`, so that trajectory is
+converged and the fault was genuinely downstream. Cheap, and it stopped a second
+integration hunt before it started.
 
 **The lesson.** A well-conditioned search means a genuine gain problem. A
 chaotic one means a structural fault, and tuning will not fix it. The
@@ -188,6 +254,32 @@ buy.
 computed in closed form. The circle task is safe because its distance is
 analytic; the figure-8 was not.
 
+## 12. Is this logic implemented more than once?
+
+**What went wrong.** Check 9's fix was applied to `plane3d_heading_pid_step`,
+`plane3d_circle_pid_step` and `plane3d_figure8_pid_step`, measured, and found to
+change *nothing at all* — the before and after numbers were identical to the
+decimal. Not "within noise": identical. That is not a result, it is a symptom,
+and the cause was that `EnvSpec.make_pid` returns
+`StatefulCascadedPlane3DPID`, a **separate** host-side implementation of the
+same three control laws. The edited functions are real and are used — by
+`env_jax.py`'s `FunctionalExpertPolicy` and by the patrol lead — just not by
+anything the benchmark runs.
+
+The heading law exists in three places, the circle law in three, the figure-8 in
+two. They must agree, and nothing enforces it.
+
+**How to check.** Before editing a control law or a piece of physics, `grep` for
+a distinctive line of it and count the hits. Afterwards, confirm the measurement
+moved: a change that alters *nothing* has usually missed its target, and an
+identical number is much stronger evidence of that than a plausible one.
+
+**What it applies to.** Every environment here has a `env.py` / `env_jax.py`
+pair, and the experts have a traced form and a host-side form. The split is
+deliberate — one is differentiable and jit-friendly, the other is cheap to step
+from Python — so the duplication is not itself the defect. Silently diverging
+is.
+
 ---
 
 ## Open items this produced
@@ -197,20 +289,28 @@ analytic; the figure-8 was not.
   defect, but it is precision-blind in the sense of check 2. `max_slot_error`
   (the error at which the formation is declared lost) is the natural envelope if
   it is converted.
-- **The circle and figure-8 guidance laws do not hold their path.** Found by
-  measuring the tracking error the reward had never been able to see: over three
-  laps the circle expert wanders 640-1670 m from an 8.4 km circle and the
-  figure-8 expert sits 6-12 km from a curve 8.4 km across. Both altitude loops
-  are fine (0.2-1.5 m), which is what the tuning runs measured -- the
-  cross-track error was never measured. Recorded as a strict xfail in
-  `tests/plane3d/test_plane3d_env.py`. By check 10 this is a structural fault,
-  not a gains fault.
+- ~~**The circle and figure-8 guidance laws do not hold their path.**~~ Half
+  resolved. The circle was never a guidance fault at all: a third to a half of
+  its own radius range is unflyable at the cruise speed the autopilot holds, and
+  trading speed for radius takes the failing seed from 1860 m to 73 m. Its half
+  of the strict xfail is now a passing test. **The figure-8 remains open** and is
+  still a strict xfail at 1.3-2.7 km, with the integrator, the loop-gain
+  scheduling and the speed schedule all now ruled out by measurement.
 - **A test episode shorter than the task's own period proves nothing.** These
   tasks are exercised over `max_steps_in_episode=200`, which at `dt = 1 s` is
   200 s against a 264 s lap, and the aircraft is initialised exactly on the
   path -- so a controller that simply flies straight ahead looks correct for the
   whole episode. Every periodic or path-following task needs an episode of
   several periods before any expert-quality claim about it means anything.
-- The reward-shaping phase in the roadmap should apply checks 1 and 2 to every
-  environment with a band or tolerance parameter.
+- ~~The reward-shaping phase should apply checks 1 and 2 to every environment
+  with a band or tolerance parameter.~~ Done: all eighteen now share one
+  log-scaled, bounded reward contract. See `docs/reward-shaping.md`.
 - Checks 3, 4 and 6 are automatable and could join the conformance suite.
+  Checks 3 and 4 have now been run as scripts and take seconds; the argument for
+  promoting them is that this pass found two write-only fields the previous
+  hand-review had missed.
+- **Checks 5, 7 and 8 have still not been run** against the other seventeen
+  environments. They are the expensive ones — each needs a regime seam, a
+  conserved quantity or an actuator authority identified per plant — and each is
+  the kind of thing that found real defects in the aircraft. They are the
+  natural next pass.

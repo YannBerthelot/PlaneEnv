@@ -503,13 +503,23 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       of a converged trajectory: at one substep the altitude was 20 m out over
       150 steps, against a reward that resolves to 1 m.
 * [ ] **Apply the model review checklist to the other environments.** The
-      aircraft work produced eleven checks in
+      aircraft work produced twelve checks in
       [docs/model-review-checklist.md](docs/model-review-checklist.md), derived
-      from real defects rather than from good intentions. Running check 1 alone
-      found the same envelope-normalised reward in the three 3D aircraft tasks
-      and in the patrol lead term, all since converted; fixing it then exposed
-      check 11 (the figure-8 was scoring its own discretisation) and, underneath
-      that, two guidance laws that do not hold their path.
+      from real defects rather than from good intentions. Checks 1-4 and 9-12
+      have now been run across all eighteen; **checks 5, 7 and 8 have not**, and
+      they are the expensive ones -- each needs a regime seam, a conserved
+      quantity or an actuator authority identified per plant.
+
+      The pass so far: check 3 found two write-only state fields a hand review
+      had missed; check 9 found the bank-commanded loop gain varies 2.38x on the
+      figure-8, and that removing it changes nothing measurable; check 10's own
+      advice cleared the integrator in one run. The circle's path-following
+      failure turned out not to be a guidance fault at all -- a third of its
+      radius range is unflyable at the cruise speed its autopilot holds, and
+      trading speed for radius took the worst seed from 1860 m to 73 m, closing
+      half of a long-standing strict xfail. Check 12 exists because the first
+      version of that fix edited one of *three* copies of the same control law
+      and measurably did nothing.
 * [x] **A reward-shaping phase.** The rewards had been written per environment as
       each was added, and the conventions had drifted -- Gaussian versus
       quadratic tracking terms, differing crash penalties, differing treatment
@@ -525,7 +535,7 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
 
 ### Known gaps
 
-The test suite records these rather than hiding them -- six `strict` xfail
+The test suite records these rather than hiding them -- five `strict` xfail
 cases, from two markers, plus the patrol baseline notes above:
 
 * **Plane Patrol expert quality**: both patrol variants now ship a PID, but it

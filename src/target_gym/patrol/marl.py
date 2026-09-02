@@ -217,7 +217,13 @@ class PlanePatrolMARL:
         collision = min_sep <= params.min_separation
 
         terminated = crash | lost | collision
-        reward = jnp.where(terminated, -1.0 * params.max_steps_in_episode, team)
+        # No explicit crash penalty. Termination already costs the agent every
+        # step it would otherwise have earned, and since the reward is
+        # non-negative everywhere that is strictly worse than flying on. A
+        # large negative spike bought nothing the forgone reward did not, and
+        # left this family on a different contract from the twelve process
+        # plants, which have always relied on forgone reward alone.
+        reward = team
         return reward, terminated
 
     # -- reset -------------------------------------------------------------

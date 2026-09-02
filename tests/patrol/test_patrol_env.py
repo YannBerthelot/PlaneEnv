@@ -134,7 +134,10 @@ class TestStep:
         assert float(separation(state)) < params.min_separation
         terminated, _ = check_is_terminal_patrol(state, params)
         assert bool(terminated)
-        assert float(compute_reward_patrol(state, params)) < 0.0
+        # The collision is punished by ending the episode, not by a negative
+        # reward: every remaining step is forgone, and the per-step reward is
+        # non-negative, so a short episode can never beat a long one.
+        assert 0.0 <= float(compute_reward_patrol(state, params)) <= 1.0
 
     def test_lost_formation_terminates(self):
         env = PlanePatrol()

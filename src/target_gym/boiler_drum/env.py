@@ -57,7 +57,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 PA_PER_BAR = 1e5
 
@@ -121,7 +121,9 @@ class BoilerDrumParams(EnvParams):
     level_band: float = 0.10  # m    tracking band for the reward
     pressure_band: float = 2.0  # bar
     level_trip: float = 0.25  # m    carryover / dryout, both irrecoverable
-    pressure_min: float = 65.0  # bar
+    pressure_min: float = 65.0
+    level_precision_floor: float = 1e-3  # m, drum level transmitter
+    pressure_precision_floor: float = 0.05  # bar, pressure transmitter  # bar
     pressure_max: float = 105.0  # bar
     fuel_weight: float = 0.05
 
@@ -400,16 +402,32 @@ def check_is_terminal(state: BoilerDrumState, params: BoilerDrumParams, xp=jnp):
 def compute_reward(state: BoilerDrumState, params: BoilerDrumParams, xp=jnp):
     """Level and pressure tracking, minus fuel.
 
-    Both terms are squared-normalised bands rather than Gaussians: they stay
-    informative well outside the band, so a controller that is far off still
-    sees a gradient back toward the setpoint.
+    Tracking is log-scaled (``utils.log_scaled_reward``): every halving of the
+    error is worth the same increment, from the plant's operating envelope down
+    to ``precision_floor``, the finest error its instrument can resolve. Below
+    that the reward stops paying, because further "improvement" is noise.
+
+    This replaced a clipped squared band, which was flat -- exactly zero, no
+    gradient -- for any error outside the band, and which stopped
+    discriminating just where a good controller operates. See
+    docs/reward-shaping.md.
+
     """
-    level_err = xp.abs(state.level)
-    level_score = xp.clip(1.0 - level_err / params.level_band, 0.0, 1.0) ** 2
-    p_err = xp.abs(state.pressure - state.target_pressure)
-    pressure_score = xp.clip(1.0 - p_err / params.pressure_band, 0.0, 1.0) ** 2
+    # Envelopes are the trip limits: the reward reaches zero exactly where the
+    # plant is lost, as it does for the aircraft's altitude envelope.
+    level_score = log_scaled_reward(
+        xp.abs(state.level), params.level_precision_floor, params.level_trip, xp
+    )
+    pressure_score = log_scaled_reward(
+        xp.abs(state.pressure - state.target_pressure),
+        params.pressure_precision_floor,
+        params.pressure_max - params.pressure_min,
+        xp,
+    )
     fuel = state.Q_fuel / params.Q_max
-    return 0.5 * level_score + 0.5 * pressure_score - params.fuel_weight * fuel
+    return (0.5 * level_score + 0.5 * pressure_score) * (
+        1.0 - params.fuel_weight * fuel
+    )
 
 
 def steady_state(params: BoilerDrumParams, p_bar=None, q_steam=None):

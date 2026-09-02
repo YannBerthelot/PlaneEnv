@@ -192,8 +192,20 @@ class TestHeadingReward:
         _, state = env.reset(key)
         params = PlaneParams3D()
         state = state.replace(z=-1.0)
-        reward = compute_reward_heading(state, params)
-        assert float(reward) < -100
+        reward = float(compute_reward_heading(state, params))
+        # There is no crash penalty any more. Termination costs the agent every
+        # step it would have earned, and because the reward is non-negative
+        # everywhere that is already strictly worse than flying on. What the
+        # reward must do here is stay inside its contract.
+        assert 0.0 <= reward <= 1.0
+        # Being outside the envelope is still the worst place to be: it scores
+        # below what holding the target scores.
+        on_target = float(
+            compute_reward_heading(
+                state.replace(z=state.target_altitude, psi=state.target_heading), params
+            )
+        )
+        assert reward < on_target
 
 
 # ─── Circle task ───────────────────────────────────────

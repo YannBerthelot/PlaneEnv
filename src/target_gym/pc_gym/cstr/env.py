@@ -7,7 +7,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 
 @struct.dataclass
@@ -29,6 +29,9 @@ class CSTRParams(EnvParams):
     T_max: float = 350.0
     T_min: float = 300.0
     C_a_min: float = 0.7
+    # Composition analyser resolution. Below this the reward would be paying
+    # for differences an online GC cannot report.
+    precision_floor: float = 1e-4  # mol/L
     C_a_max: float = 1.0
 
     target_CA_range: Tuple[float, float] = (0.84, 0.91)
@@ -116,7 +119,13 @@ def check_is_terminal(state: CSTRState, params: CSTRParams, xp=jnp):
 
 
 def compute_reward(state: CSTRState, params: CSTRParams, xp=jnp):
-    max_C_a_diff = params.C_a_max - params.C_a_min
-    reward = ((max_C_a_diff - xp.abs(state.target_CA - state.C_a)) / max_C_a_diff) ** 2
-
-    return reward
+    # Log-scaled: every halving of the concentration error is worth the same,
+    # down to what the analyser can resolve. The previous form divided the error
+    # by the whole 0.3 mol/L envelope and squared it, which is nearly flat over
+    # any error a working controller produces -- checklist check 1.
+    return log_scaled_reward(
+        xp.abs(state.target_CA - state.C_a),
+        params.precision_floor,
+        params.C_a_max - params.C_a_min,
+        xp,
+    )

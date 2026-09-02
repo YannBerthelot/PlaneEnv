@@ -106,11 +106,21 @@ class Reactor(environment.Environment[ReactorState, ReactorParams]):
             length=CONTROL_PERIOD,
         )
 
+        # Mean over the sub-steps rather than the sum. The action is held for
+        # ``CONTROL_PERIOD`` physics sub-steps, and summing made one environment
+        # step of this plant worth several times a step of any other -- its
+        # per-step reward peaked near 4.7 where every other environment caps
+        # around 1.0, which is misleading the moment returns are read across
+        # environments. Dividing by a positive constant leaves the optimal policy
+        # and every within-environment comparison untouched.
+        #
+        # Terminating mid-period still costs: only the sub-steps before the stop
+        # contribute to the sum, so the mean falls with them.
         obs = self.get_obs(new_state)
         return (
             obs,
             new_state,
-            reward,
+            reward / CONTROL_PERIOD,
             terminated,
             {"last_state": new_state},
         )

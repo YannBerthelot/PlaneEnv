@@ -50,7 +50,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 # Bisection steps for the pH root-find. The bracket is [0, 14], so 20 halvings
 # resolve to ~1.3e-5 pH units -- three orders of magnitude finer than a pH
@@ -101,7 +101,10 @@ class PHParams(EnvParams):
     pK2: float = 10.25
 
     # ---- Operating / termination bounds ----
-    pH_min: float = 2.0  # grossly acidic -- off spec
+    pH_min: float = 2.0
+    precision_floor: float = (
+        1e-2  # pH units, glass electrode resolution  # grossly acidic -- off spec
+    )
     pH_max: float = 12.0  # grossly alkaline -- off spec
 
     # ---- Reward shaping ----
@@ -253,9 +256,11 @@ def check_is_terminal(state: PHState, params: PHParams, xp=jnp):
 def compute_reward(state: PHState, params: PHParams, xp=jnp):
     """pH tracking minus a small reagent cost."""
     err = xp.abs(state.target_pH - state.pH)
-    tracking = xp.clip(1.0 - err / params.tracking_band, 0.0, 1.0) ** 2
+    tracking = log_scaled_reward(
+        err, params.precision_floor, params.pH_max - params.pH_min, xp
+    )
     reagent = (state.q3 - params.q3_min) / (params.q3_max - params.q3_min)
-    return tracking - params.reagent_cost_weight * reagent
+    return tracking * (1.0 - params.reagent_cost_weight * reagent)
 
 
 def steady_state_invariants(q3, q2, params: PHParams):

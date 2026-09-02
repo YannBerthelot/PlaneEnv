@@ -46,7 +46,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 N_STAGES = 41  # 40 trays + reboiler + condenser, minus shared indexing
 N_FEED = 21  # feed stage, counting the reboiler as stage 1
@@ -90,6 +90,7 @@ class DistillationParams(EnvParams):
     # Purity errors are small numbers, so the band is small too: 0.01 mole
     # fraction is the scale on which this column is actually operated.
     tracking_band: float = 0.02
+    precision_floor: float = 1e-4  # mole fraction, online analyser resolution
     boilup_cost_weight: float = 0.05  # reboiler duty is the running cost
 
     # ---- Targets ----
@@ -257,10 +258,11 @@ def compute_reward(state: DistillationState, params: DistillationParams, xp=jnp)
     """
     err_top = xp.abs(state.target_yD - state.x[-1])
     err_bot = xp.abs(state.target_xB - state.x[0])
-    top = xp.clip(1.0 - err_top / params.tracking_band, 0.0, 1.0)
-    bottom = xp.clip(1.0 - err_bot / params.tracking_band, 0.0, 1.0)
+    # Mole fractions live on [0, 1], so that is the envelope.
+    top = log_scaled_reward(err_top, params.precision_floor, 1.0, xp)
+    bottom = log_scaled_reward(err_bot, params.precision_floor, 1.0, xp)
     boilup = (state.V - params.V_min) / (params.V_max - params.V_min)
-    return top * bottom - params.boilup_cost_weight * boilup
+    return top * bottom * (1.0 - params.boilup_cost_weight * boilup)
 
 
 def separation_factor(state: DistillationState):

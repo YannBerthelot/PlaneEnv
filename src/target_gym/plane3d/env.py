@@ -282,9 +282,14 @@ def compute_reward_heading(state: PlaneState3D, params: PlaneParams3D, xp=jnp):
     of saturating a few hundred metres from the target.  Crash penalty matches
     Plane 2D.
     """
-    done_alt = terminal_penalty(state, params, xp)
     reward = altitude_reward(state, params, xp) * heading_reward(state, params, xp)
-    return xp.where(done_alt, -1.0 * params.max_steps_in_episode, reward)
+    # No explicit crash penalty. Termination already costs the agent every
+    # step it would otherwise have earned, and since the reward is
+    # non-negative everywhere that is strictly worse than flying on. A
+    # large negative spike bought nothing the forgone reward did not, and
+    # left this family on a different contract from the twelve process
+    # plants, which have always relied on forgone reward alone.
+    return reward
 
 
 # ─── Circle task reward ─────────────────────────────────
@@ -300,11 +305,16 @@ def distance_to_circle(state: PlaneState3D):
 
 def compute_reward_circle(state: PlaneState3D, params: PlaneParams3D, xp=jnp):
     """Reward: altitude tracking * proximity to the circle path, both log-scaled."""
-    done_alt = terminal_penalty(state, params, xp)
     alt_r = altitude_reward(state, params, xp)
     d = xp.abs(distance_to_circle(state))
     circle_r = path_reward(d, state, params, xp)
-    return xp.where(done_alt, -1.0 * params.max_steps_in_episode, alt_r * circle_r)
+    # No explicit crash penalty. Termination already costs the agent every
+    # step it would otherwise have earned, and since the reward is
+    # non-negative everywhere that is strictly worse than flying on. A
+    # large negative spike bought nothing the forgone reward did not, and
+    # left this family on a different contract from the twelve process
+    # plants, which have always relied on forgone reward alone.
+    return alt_r * circle_r
 
 
 # ─── Figure-8 task: twisted 3D lemniscate ───────────────
@@ -427,10 +437,15 @@ def compute_reward_figure8(state: PlaneState3D, params: PlaneParams3D, xp=jnp):
     twist makes crossovers unambiguous (different altitudes), so the reward
     has a single global optimum: fly along the curve.
     """
-    done_alt = terminal_penalty(state, params, xp)
     _, _, _, dist, _ = nearest_point_on_twisted_lemniscate(state, params)
     track_r = path_reward(dist, state, params, xp)
-    return xp.where(done_alt, -1.0 * params.max_steps_in_episode, track_r)
+    # No explicit crash penalty. Termination already costs the agent every
+    # step it would otherwise have earned, and since the reward is
+    # non-negative everywhere that is strictly worse than flying on. A
+    # large negative spike bought nothing the forgone reward did not, and
+    # left this family on a different contract from the twelve process
+    # plants, which have always relied on forgone reward alone.
+    return track_r
 
 
 # ─── Observation helpers ────────────────────────────────

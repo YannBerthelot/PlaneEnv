@@ -47,7 +47,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 SECONDS_PER_DAY = 86_400.0
 SECONDS_PER_HOUR = 3_600.0
@@ -104,7 +104,10 @@ class HVACParams(EnvParams):
     setpoint_occupied_range: Tuple[float, float] = (20.0, 22.5)
 
     # ---- Comfort / termination bounds ----
-    T_air_min: float = 5.0  # C, building left to freeze
+    T_air_min: float = 5.0
+    precision_floor: float = (
+        0.1  # K, room temperature sensor resolution  # C, building left to freeze
+    )
     T_air_max: float = 35.0  # C, grossly overheated
 
     # ---- Reward shaping ----
@@ -433,14 +436,23 @@ def check_is_terminal(state: HVACState, params: HVACParams, xp=jnp):
 def compute_reward(state: HVACState, params: HVACParams, xp=jnp):
     """Comfort tracking minus energy use.
 
-    Comfort is a squared-normalised band rather than a Gaussian: it stays
-    informative several degrees out, so a controller that is far off still
-    sees a gradient back toward the setpoint.
+    Tracking is log-scaled (``utils.log_scaled_reward``): every halving of the
+    error is worth the same increment, from the plant's operating envelope down
+    to ``precision_floor``, the finest error its instrument can resolve. Below
+    that the reward stops paying, because further "improvement" is noise.
+
+    This replaced a clipped squared band, which was flat -- exactly zero, no
+    gradient -- for any error outside the band, and which stopped
+    discriminating just where a good controller operates. See
+    docs/reward-shaping.md.
+
     """
     err = xp.abs(state.target_T - state.T_air)
-    comfort = xp.clip(1.0 - err / (2.0 * params.comfort_band), 0.0, 1.0) ** 2
+    comfort = log_scaled_reward(
+        err, params.precision_floor, params.T_air_max - params.T_air_min, xp
+    )
     energy = state.Q_emitter / params.Q_heat_max
-    return comfort - params.energy_weight * energy
+    return comfort * (1.0 - params.energy_weight * energy)
 
 
 def energy_use_kwh(state: HVACState, params: HVACParams):

@@ -616,3 +616,293 @@ def test_attitude_rates_stay_bounded_under_extreme_actions(spec):
         "A rate that large is a state running away, not a manoeuvre -- the axis "
         "has no damping."
     )
+
+
+# ---------------------------------------------------------------------------
+# 7. Model review checks
+#
+# Promoted from docs/model-review-checklist.md, which was a page of prose and a
+# set of scratch scripts. Each check below found something real once, and each
+# is cheap enough to keep. The allowlists exist so that a check reports *new*
+# defects rather than re-reporting the known-benign findings every run -- and
+# so that adding an entry to one is a deliberate act with a reason attached.
+# ---------------------------------------------------------------------------
+
+
+# Check 3. Fields written into state and never read back. All four are records
+# of a commanded or diagnostic quantity: the local variable of that name carries
+# the value into the dynamics, and the state field only reports it.
+KNOWN_WRITE_ONLY_STATE_FIELDS = {
+    ("HVACState", "T_surface"),
+    ("HVACState", "Q_command"),
+    ("GlassFurnaceState", "T_stack"),
+    ("WindTurbineState", "torque_cmd"),
+}
+
+
+def test_no_new_write_only_state_fields():
+    """Check 3: a field written but never read hides a disagreement.
+
+    ``state.m`` was once set to 92 588 kg, above the aircraft's maximum takeoff
+    weight, while the dynamics integrated ``initial_mass`` directly. Nothing
+    read the field, so a 20-tonne error sat there until fuel burn made mass
+    load-bearing.
+    """
+    import ast
+    import pathlib
+    import re
+
+    src = pathlib.Path("src/target_gym")
+    texts = {f: f.read_text() for f in sorted(src.rglob("*.py"))}
+    everything = "\n".join(texts.values())
+
+    found = set()
+    for path, text in texts.items():
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:  # pragma: no cover - not expected
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.ClassDef) and node.name.endswith("State")):
+                continue
+            for item in node.body:
+                if not (
+                    isinstance(item, ast.AnnAssign)
+                    and isinstance(item.target, ast.Name)
+                ):
+                    continue
+                name = item.target.id
+                if not re.search(rf"\.{re.escape(name)}\b", everything):
+                    found.add((node.name, name))
+
+    new = found - KNOWN_WRITE_ONLY_STATE_FIELDS
+    assert not new, (
+        f"state fields written but never read: {sorted(new)}. Either the "
+        "dynamics meant to use one and do not, or it is a diagnostic record -- "
+        "read it before adding it to KNOWN_WRITE_ONLY_STATE_FIELDS."
+    )
+
+
+# Check 4. Tuple unpacks that discard a component. All three discard position
+# coordinates the equations of motion genuinely do not depend on, or a scan
+# carry.
+KNOWN_DISCARDED_UNPACKS = {
+    ("plane/dynamics.py", "_, z, theta = positions"),
+    ("plane3d/dynamics.py", "_, _, z, theta, phi = positions"),
+    ("utils.py", "_, rewards = result"),
+}
+
+
+def test_no_state_component_is_silently_discarded():
+    """Check 4: ``x_dot, z_dot, _ = velocities`` threw away the pitch rate.
+
+    That one line is why the aircraft had no pitch damping and a departed
+    airframe tumbled indefinitely.
+    """
+    import pathlib
+    import re
+
+    src = pathlib.Path("src/target_gym")
+    found = set()
+    for path in sorted(src.rglob("*.py")):
+        rel = str(path.relative_to(src))
+        for line in path.read_text().splitlines():
+            m = re.match(r"\s*([\w\s,]+)=\s*([\w\.\[\]]+)\s*$", line)
+            if not m:
+                continue
+            lhs = [x.strip() for x in m.group(1).split(",")]
+            if len(lhs) >= 2 and "_" in lhs:
+                found.add((rel, line.strip()))
+
+    new = found - KNOWN_DISCARDED_UNPACKS
+    assert not new, (
+        f"tuple unpacks discarding a component: {sorted(new)}. Confirm the "
+        "physics genuinely does not depend on it before allowlisting."
+    )
+
+
+@pytest.mark.slow
+def test_actuator_can_move_the_tracked_variable(spec):
+    """Check 8: an actuator whose authority was written down, not derived.
+
+    The aileron moment once applied the wing's lift-curve slope to the control
+    deflection, rolling the aircraft at 84 deg/s against a transport's 25-30.
+    The plant-agnostic form is weaker but catches the opposite failure: an
+    actuator that cannot move its own tracked variable is decorative, and every
+    score against it measures the initial condition.
+    """
+    from target_gym.runners.runners import _as_tuple
+
+    env, params = spec.make_env(), spec.make_test_params()
+    idx = list(_as_tuple(env.obs_value_index))
+    space = env.action_space(params)
+    shape = space.shape or (1,)
+    low = np.broadcast_to(np.asarray(space.low, float), shape)
+    high = np.broadcast_to(np.asarray(space.high, float), shape)
+    step = jax.jit(env.step_env)
+
+    excursion = 0.0
+    for action in (jnp.asarray(low), jnp.asarray(high)):
+        key = jax.random.PRNGKey(0)
+        obs, state = env.reset_env(key, params)
+        start = np.asarray(obs)[idx]
+        for _ in range(min(int(params.max_steps_in_episode), 400)):
+            key, sub = jax.random.split(key)
+            obs, state, _, terminated, _ = step(sub, state, action, params)
+            excursion = max(
+                excursion, float(np.abs(np.asarray(obs)[idx] - start).max())
+            )
+            if bool(terminated):
+                break
+
+    assert excursion > 0.0, (
+        f"{spec.name}: full actuator travel in both directions never moved the "
+        "tracked variable. The actuator has no authority over the thing the "
+        "environment scores."
+    )
+
+
+@pytest.mark.slow
+def test_plant_does_not_accelerate_without_input(spec):
+    """Check 7: can the energy budget be bounded from outside?
+
+    Energy may only enter through the actuator, so with the actuator at zero
+    nothing may grow without bound. Growth alone proves nothing -- position
+    grows because an aircraft flies forward, and cumulative fade grows because
+    it counts -- so what is asserted is that growth does not *accelerate*: the
+    mean increment over the last fifth of an unforced run against the first.
+    An integrator holds near 1; an unstable mode runs away.
+    """
+    env = spec.make_env()
+    params = spec.make_test_params()
+    key = jax.random.PRNGKey(0)
+    obs, state = env.reset_env(key, params)
+    fields = [
+        f
+        for f in state.__dataclass_fields__
+        if f != "time"
+        and np.ndim(getattr(state, f, None)) == 0
+        and np.issubdtype(np.asarray(getattr(state, f)).dtype, np.floating)
+    ]
+    if not fields:
+        pytest.skip(f"{spec.name} has no scalar float state")
+
+    step = jax.jit(env.step_env)
+    action = _zero_action(env, params)
+    traj = [np.array([float(getattr(state, f)) for f in fields])]
+    for _ in range(min(int(params.max_steps_in_episode), 600)):
+        key, sub = jax.random.split(key)
+        _, state, _, terminated, _ = step(sub, state, action, params)
+        traj.append(np.array([float(getattr(state, f)) for f in fields]))
+        if bool(terminated):
+            break
+
+    tr = np.stack(traj)
+    assert np.isfinite(tr).all(), f"{spec.name}: non-finite state under zero input"
+    if len(tr) < 10:
+        pytest.skip(f"{spec.name} terminates too early to measure a trend")
+
+    inc = np.abs(np.diff(tr, axis=0))
+    fifth = max(len(inc) // 5, 1)
+    early = inc[:fifth].mean(axis=0)
+    late = inc[-fifth:].mean(axis=0)
+    ratio = np.where(early > 1e-12, late / np.maximum(early, 1e-12), 0.0)
+    j = int(np.argmax(ratio))
+
+    assert ratio[j] < ACCELERATION_LIMIT, (
+        f"{spec.name}: {fields[j]} grows {ratio[j]:.1f}x faster at the end of an "
+        "unforced run than at the start. With the actuator at zero nothing is "
+        "supplying it, so the plant is producing it."
+    )
+
+
+# Measured worst over all eighteen: the glass furnace's T_work at 3.25x over
+# 3000 unforced steps. 8x leaves room for the shorter run used here without
+# admitting a genuinely unstable mode.
+ACCELERATION_LIMIT = 8.0
+
+
+# Check 5. Environments with a known seam that survives refinement, and what it
+# is. Everything else must join smoothly.
+KNOWN_SEAMS = {
+    "plane": "shock-stall model near 308 m/s, outside the reachable envelope",
+    "plane3d_heading": "shock-stall model near 308 m/s, unreachable",
+    "plane3d_circle": "shock-stall model near 308 m/s, unreachable",
+    "plane3d_figure8": "shock-stall model near 308 m/s, unreachable",
+    "battery": "state-of-charge-dependent power limit binding near soc 0.115",
+    "reactor": "fuel-temperature feedback near 718 K",
+    "glass_furnace": "m_batch = maximum(.., 0) -- the batch blanket running out",
+}
+SEAM_LIMIT = 0.5
+
+
+@pytest.mark.slow
+def test_regimes_join_smoothly(spec):
+    """Check 5: do the regimes join?
+
+    Past the stall the aircraft collapsed lift, and because drag was
+    ``cd0 + k*CL**2`` it collapsed drag with it, so a separated wing had *less*
+    drag than in cruise.
+
+    Sampling cannot test this: comparing the largest step to the typical step
+    flags any function whose derivative grows, which ranks Arrhenius above every
+    real seam. These dynamics are differentiable, so compare the two one-sided
+    Jacobians of a single step instead --
+
+        jump = |J(x+eps) - J(x-eps)| / (|J(x+eps)| + |J(x-eps)|)
+
+    -- which goes to zero for any smooth function however steep, and holds
+    across a kink. Both sides must be active: where one Jacobian is exactly zero
+    the ratio is 1 by construction, and that is a saturation, not two physical
+    descriptions failing to join.
+    """
+    env, params = spec.make_env(), spec.make_test_params()
+    key = jax.random.PRNGKey(0)
+    _, state = env.reset_env(key, params)
+    fields = [
+        f
+        for f in state.__dataclass_fields__
+        if f != "time"
+        and np.ndim(getattr(state, f, None)) == 0
+        and np.issubdtype(np.asarray(getattr(state, f)).dtype, np.floating)
+    ]
+    if not fields:
+        pytest.skip(f"{spec.name} has no scalar float state")
+    action = _zero_action(env, params)
+
+    worst, where = 0.0, None
+    for f in fields:
+        base = float(getattr(state, f))
+        span = abs(base) if abs(base) > 1e-6 else 1.0
+        xs = jnp.linspace(base - 0.75 * span, base + 0.75 * span, 121)
+        eps = 1e-3 * span
+
+        def one(x, _f=f):
+            s = state.replace(**{_f: x})
+            _, s2, _, _, _ = env.step_env(key, s, action, params)
+            return jnp.stack([getattr(s2, g) for g in fields])
+
+        try:
+            jac = jax.jit(jax.vmap(jax.jacfwd(one)))
+            Jm, Jp = jac(xs - eps), jac(xs + eps)
+        except Exception:  # pragma: no cover - a plant that will not linearise
+            continue
+        num, den = jnp.abs(Jp - Jm), jnp.abs(Jp) + jnp.abs(Jm)
+        peak = jnp.max(den, axis=0, keepdims=True)
+        both = jnp.minimum(jnp.abs(Jp), jnp.abs(Jm)) > 0.05 * jnp.maximum(peak, 1e-30)
+        jump = np.nan_to_num(
+            np.asarray(jnp.where(both & (den > 0), num / jnp.maximum(den, 1e-30), 0.0))
+        )
+        if jump.size and jump.max() > worst:
+            worst = float(jump.max())
+            k = int(np.argmax(jump.max(axis=0)))
+            where = f"{f} -> {fields[k]}"
+
+    if spec.name in KNOWN_SEAMS:
+        pytest.skip(f"{spec.name}: known seam -- {KNOWN_SEAMS[spec.name]}")
+    assert worst < SEAM_LIMIT, (
+        f"{spec.name}: the dynamics have a seam at {where} (jump {worst:.2f}). "
+        "Two descriptions of this plant meet there and do not join. A rapid "
+        "transition is fine; a discontinuous derivative is a modelling error "
+        "unless it is a physical limit -- document it in KNOWN_SEAMS if so."
+    )

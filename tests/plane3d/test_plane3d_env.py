@@ -637,9 +637,18 @@ _FIGURE8_PATH_XFAIL = (
     "264 s lap, and the aircraft starts exactly on the path -- so a controller "
     "that simply flies straight ahead looks correct for the whole episode. "
     "The circle half of this was a *feasibility* fault and is now fixed (see "
-    "docs/model-review-checklist.md check 9); the same treatment was tried here "
-    "and measured worse, so speed is not the binding constraint on this curve "
-    "and the guidance law itself remains the open question."
+    "docs/model-review-checklist.md check 9). This half is not: the MPC holds "
+    "the same curve to 0.5 m on the same episode, so the target is reachable "
+    "and the aircraft permits the manoeuvre -- it is this guidance law that "
+    "cannot fly it. Ruled out by measurement, each reverted after it failed to "
+    "help: the integrator (identical at rk4_2/4/8), the 1/V loop-gain "
+    "scheduling, a speed schedule (constant 2824 m, curvature-scheduled "
+    "2098 m, against 1779 m for neither), the 25 deg bank limit (1547 m at its "
+    "best, 55 deg) and a coordinated-turn feedforward of the kind the circle "
+    "law has always had (1532 m). What remains untried is the blend itself: "
+    "beyond 5% of the lobe radius it chases the bearing to the nearest curve "
+    "point and ignores the tangent, which is pure pursuit, and pure pursuit "
+    "lags on a curved path by construction."
 )
 
 

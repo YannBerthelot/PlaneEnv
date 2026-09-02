@@ -529,6 +529,12 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       energy from its own equations, and the only seams that survive refinement
       are a mass clamped at zero, a power limit binding, and one in the aircraft
       at 308 m/s that full actuator travel cannot reach.
+
+      Checks 3, 4, 5, 7 and 8 now run in
+      [the conformance suite](tests/test_env_conformance.py) against every
+      registered environment, each with an allowlist so it reports *new*
+      defects rather than restating known-benign ones. A new environment
+      inherits them by adding one line to the registry.
 * [x] **A reward-shaping phase.** The rewards had been written per environment as
       each was added, and the conventions had drifted -- Gaussian versus
       quadratic tracking terms, differing crash penalties, differing treatment

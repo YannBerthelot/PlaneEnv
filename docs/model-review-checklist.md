@@ -287,6 +287,14 @@ to. The circle law now publishes the speed its radius admits and the shared
 airspeed channel holds it, which takes the failing seed from **1860 m to 73 m**
 and lets the strict xfail be narrowed to the figure-8 alone.
 
+**The figure-8's target is reachable; its expert simply cannot fly there.** The
+MPC holds the same curve to **0.5 m** over the same 800-step episode, using up
+to 76.7 deg of bank at 160-204 m/s. The geometry is not asking for a path the
+aircraft cannot fly, so changing the task would be fixing the wrong thing --
+worth stating plainly, because "make the target reachable" is the tempting
+response to a controller that misses by kilometres, and here it would have made
+the benchmark easier while leaving the actual defect in place.
+
 **The same treatment made the figure-8 worse, which is the more interesting
 half.** Its lemniscate has a minimum radius of curvature of `a/3`, so at the
 shipped 8.4 km lobe radius the lobes admit only 114 m/s — and on a fixed
@@ -295,9 +303,20 @@ is real and quantified. But holding one speed for the whole curve took the
 three-lap error from 1779 m to 2824 m, and scheduling it against local curvature
 (differentiating the observed tangent heading with respect to distance
 travelled) still gave 2098 m. Both were reverted. Speed is *not* the binding
-constraint on that curve, so its guidance law is still the open question — now
-narrowed by having ruled out the integrator, the loop-gain scheduling and the
-speed schedule.
+constraint on that curve. Nor is its bank limit: raising the expert's 25 deg cap
+through 75 deg bottoms out at 1547 m and then gets worse. Nor is a missing
+coordinated-turn feedforward -- the circle law has had one all along and this one
+never did, and adding it, with curvature estimated from the rate of change of
+the observed tangent heading, reaches 1532 m, which is real but does not change
+the outcome, so it went the way of the stall barrier.
+
+Five candidates are now eliminated by measurement rather than argument: the
+integrator, the loop-gain scheduling, the speed schedule, the bank limit and the
+feedforward. What remains untried is the blend at the centre of the law: beyond
+5% of the lobe radius it chases the *bearing to the nearest curve point* and
+ignores the tangent entirely. That is pure pursuit, and pure pursuit lags a
+curved path by construction -- which is the symptom. That is where the next
+attempt should go.
 
 ## 10. What does the tuning objective's behaviour tell you?
 
@@ -405,10 +424,18 @@ is.
 - ~~The reward-shaping phase should apply checks 1 and 2 to every environment
   with a band or tolerance parameter.~~ Done: all eighteen now share one
   log-scaled, bounded reward contract. See `docs/reward-shaping.md`.
-- Checks 3, 4 and 6 are automatable and could join the conformance suite.
-  Checks 3 and 4 have now been run as scripts and take seconds; the argument for
-  promoting them is that this pass found two write-only fields the previous
-  hand-review had missed.
+- ~~Checks 3, 4 and 6 are automatable and could join the conformance suite.~~
+  Done, and more than those three. `tests/test_env_conformance.py` now runs
+  checks 3, 4, 5, 7 and 8 against every registered environment, so a new
+  environment inherits them by adding one line to the registry. Checks 3 and 4
+  are repository-wide scans and cost seconds, so they run in the fast job;
+  checks 5, 7 and 8 step or differentiate every plant and are marked `slow`,
+  adding about 100 s to that job.
+
+  Each carries an allowlist -- `KNOWN_WRITE_ONLY_STATE_FIELDS`,
+  `KNOWN_DISCARDED_UNPACKS`, `KNOWN_SEAMS` -- so the tests report *new* defects
+  instead of restating the known-benign ones every run, and so that admitting a
+  finding is a deliberate act with a reason recorded next to it.
 - ~~Checks 5, 7 and 8 have still not been run against the other seventeen
   environments.~~ Run. All twelve checks have now been applied to all eighteen.
   Each turned out to have a plant-agnostic form needing no per-plant seam,

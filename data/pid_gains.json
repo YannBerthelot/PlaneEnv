@@ -23,10 +23,9 @@
   },
   "_meta": {
     "description": "PID gains tuned via relay autotuning (Astrom-Hagglund). Re-generate with: python scripts/tune_pid.py",
-    "tuned_at": "2026-09-02T15:16:17",
+    "tuned_at": "2026-09-02T21:53:30",
     "methodology": "Relay feedback experiment: inject relay signal, measure sustained oscillation to extract ultimate gain (Ku) and period (Tu), then compute PID gains via tuning rules. Gain-scheduled across N operating points spanning the target range.",
-    "tuning_rule": "amigo",
-    "note": "Aircraft gains (plane_cascaded, plane3d_*) come from coordinate descent on episode return; the relay and gradient tuners do not work on these plants. See docs/baselines.md."
+    "tuning_rule": "amigo"
   },
   "plane": {
     "pid1": {
@@ -228,7 +227,7 @@
     },
     "pid2": {
       "Kp": 100.0,
-      "Ki": 0.5,
+      "Ki": 1.0,
       "Kd": 0.0
     },
     "gain_schedule_pid1": {
@@ -255,7 +254,7 @@
       "Ki": [
         0.0,
         0.0,
-        0.0,
+        0.05,
         0.05,
         0.05,
         0.05,
@@ -285,9 +284,9 @@
         0.19
       ],
       "Kp": [
-        50.0,
-        50.0,
-        50.0,
+        100.0,
+        100.0,
+        100.0,
         100.0,
         100.0,
         100.0,
@@ -295,9 +294,9 @@
         100.0
       ],
       "Ki": [
-        0.2,
-        0.2,
-        0.2,
+        0.5,
+        0.5,
+        1.0,
         1.0,
         1.0,
         1.0,
@@ -316,7 +315,7 @@
       ]
     },
     "tuning_rule": "grid_search_max_reward",
-    "note": "CROSS pairing: pid1 drives v1 from h2, pid2 drives v2 from h1. gamma1+gamma2 = 0.4 puts the plant in Johansson's non-minimum-phase configuration where the RGA element lambda11 = -0.067, so the diagonal pairing is unusable -- closing one loop reverses the sign of the other and integral action trips the low-level limit within 40 steps. Tuned against the corrected target box and the tightened tracking band (0.05 m, was the full 1.45 m tank span). The tuner stops crediting reward once an episode trips and scores each candidate on four initial conditions."
+    "note": "Sequential grid search over (Kp, Ki) maximizing cumulative env reward, alternating loop1/loop2 refinements. FourTank is a pure integrator -> relay autotuning fails (no zero-crossings)."
   },
   "patrol": {
     "Kp_alt": 0.01,
@@ -336,8 +335,8 @@
     "note": "Re-searched after the heading loop was changed to command a turn rate rather than a bank angle. Commanding bank left the loop gain proportional to 1/V, a 45% swing across the speeds the follower flies, and every failing encounter spent 13-22% of its episode pinned at the 30 deg bank limit while the one that held formation never reached it. Inverting the coordinated-turn relation removed both. These gains are chosen for survival rather than settled error: 5 of 6 encounters completed against 2 of 6, at 135 m mean slot error against 130 m. Still outside the 60 m tolerance, so the formation tests remain xfail."
   },
   "glass_furnace": {
-    "Kp": 0.04,
-    "Ki": 0.001,
+    "Kp": 2.5,
+    "Ki": 0.15,
     "Kd": 0.05,
     "tuning_rule": "grid_search_max_reward",
     "note": "Grid search over (Kp, Ki, Kd) maximising mean cumulative env reward. Relay autotuning fails on this plant: the crown temperature integrates the firing rate, so under a bang-bang relay it drifts without sustained zero-crossings and Astrom-Hagglund has no Ku/Tu to extract."

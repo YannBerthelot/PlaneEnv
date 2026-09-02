@@ -1590,22 +1590,22 @@ def make_cement_kiln_mpc(
 def _battery_objective(state, params):
     """Smooth stand-in for the battery's reward, with the same minimiser.
 
-    The environment scores dispatch tracking as ``clip(1 - err/band, 0, 1)**2``,
-    the same clipped form the wind turbine uses, and it fails the same way: once
-    the power error leaves the band the tracking term is flat, and the only
-    gradient left belongs to the degradation and state-of-charge terms, which
-    both pull toward doing nothing. Measured over ten seeds the controller
-    returned 95 against the PID's 157, ahead on 1 seed.
+    This surrogate was written against a clipped ``clip(1-err/band, 0, 1)**2``
+    tracking term that was exactly flat outside the band, leaving the optimiser
+    nothing to descend but the degradation and state-of-charge terms, which both
+    pull toward doing nothing. That reward is gone -- tracking is log-scaled now,
+    and never flat. The surrogate stays anyway, for the reason given in
+    :func:`_wind_turbine_objective`: log-scaling fixes the *value*, not the
+    gradient, which still decays like ``1/err``. Re-measured over ten seeds
+    against the log-scaled reward it is worth a median of +9 (155.8 against
+    146.8).
 
-    Replacing the clipped term with a plain quadratic in the normalised error
-    keeps the minimiser and restores a gradient that grows with the error:
-    164 against 157 on the mean.
-
-    That mean is worth reading carefully. It is carried by one seed where
-    lookahead pays enormously (358 against 165); on the other nine the MPC is
-    still behind by 5 to 24, for a median of -11. So this is a large improvement
-    and *not* an upper bound, and horizon, iterations and step size were all
-    swept without closing the remainder.
+    Read the mean with care in either case. It is carried by one seed where
+    lookahead pays enormously (350 against the PID's 164); on the other nine the
+    MPC is behind by 4 to 13, for a median of -4 against the PID and 1 win in
+    10. So this is a large improvement over descending the reward directly and
+    *not* an upper bound -- horizon, iterations and step size were all swept
+    without closing the remainder. It is inside the 10% contract tolerance.
     """
     from target_gym.energy.battery.env import degradation_rate
 
@@ -1657,17 +1657,27 @@ _WT_BARRIER_WEIGHT = 10.0
 def _wind_turbine_objective(state, params):
     """Smooth stand-in for the turbine's reward, with the same minimiser.
 
-    The environment scores power tracking as ``clip(1 - err/band, 0, 1)**2``
-    minus a pitch-activity penalty. That is a fine thing to be scored on and a
-    useless thing to descend: one step off the operating point puts the error at
-    nearly four times the band, where the tracking term is clipped flat and the
-    only surviving gradient belongs to the *penalty*. The optimiser is then
-    correctly guided to stop moving the pitch, and the controller returns ~0 for
-    the rest of the episode -- which is what it did, at every horizon tried.
+    The environment used to score power tracking as ``clip(1-err/band, 0, 1)**2``
+    minus a pitch-activity penalty: a fine thing to be scored on and a useless
+    thing to descend, because one step off the operating point puts the error at
+    nearly four times the band, where the term is clipped flat and the only
+    surviving gradient belongs to the *penalty*. The optimiser was then correctly
+    guided to stop moving the pitch, and returned ~0 for the rest of the episode.
 
-    Replacing the clipped term with a plain quadratic in the normalised error
-    keeps the minimiser (zero error, no activity) and restores a gradient that
-    grows with the error instead of vanishing.
+    The reward is log-scaled now and has no flat region, so that premise is gone
+    -- but the surrogate is still needed, for a subtler reason. Log-scaling makes
+    the reward scale-free in *value* (each halving of the error is worth the same
+    increment); it does not make the *gradient* scale-free. Differentiating
+    ``1 - log1p(e/f)/log1p(E/f)`` gives ``-1/((f + e) * log1p(E/f))``, which
+    decays like ``1/e``: the pull toward the setpoint is weakest exactly where
+    the controller is furthest from it. A quadratic in the normalised error has
+    the same minimiser and a gradient that instead *grows* with the error.
+
+    Measured over six seeds against the log-scaled reward, that difference is
+    still worth almost everything: 341.9 for this surrogate against 172.1 for
+    the reward itself (with the barrier below in both). So the surrogate is not a
+    workaround for a broken reward any more -- it is a planner-side
+    reformulation, which is a normal thing for an MPC to carry.
     """
     from target_gym.energy.wind_turbine.env import electrical_power, omega_rated
 
@@ -1686,6 +1696,9 @@ def _wind_turbine_objective(state, params):
     # A differentiable penalty that switches on before the boundary does give a
     # gradient, and it is what makes this controller stable: over twelve seeds
     # the worst episode goes from 22 to 307 and the spread from sd 152 to 24.
+    # Re-checked against the log-scaled reward, where it is still the difference
+    # between controlling and tripping: 172.1 with the barrier, 52.4 without,
+    # and without it 6 of 6 episodes ended early on the overspeed trip.
     # The onset matters (0.85 beats 0.80); the weight barely does (10, 30 and
     # 100 land within 0.4 of each other), which is the signature of a term that
     # is shaping the approach rather than trading against the objective.

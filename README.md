@@ -510,13 +510,17 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       and in the patrol lead term, all since converted; fixing it then exposed
       check 11 (the figure-8 was scoring its own discretisation) and, underneath
       that, two guidance laws that do not hold their path.
-* [ ] **A reward-shaping phase.** The rewards were written per environment as
-      each was added, and the shaping conventions have drifted -- Gaussian
-      versus quadratic tracking terms, differing crash penalties, differing
-      treatment of the target band. A learned policy's score is only comparable
-      across environments if the shaping is coherent, and `plane-reward-exponent`
-      (a tracking exponent of 10 versus 2, a pseudo-Huber cost) is unfinished
-      work in exactly this area.
+* [x] **A reward-shaping phase.** The rewards had been written per environment as
+      each was added, and the conventions had drifted -- Gaussian versus
+      quadratic tracking terms, differing crash penalties, differing treatment
+      of the target band, and four environments whose reward was *identically
+      zero* across the first three halvings of their error. All eighteen now
+      share one contract: `(tracking terms, multiplied) x (1 - weighted costs)`,
+      bounded in `[0, 1]`, log-scaled around a floor taken from each plant's own
+      instrumentation. Costs multiply rather than subtract, so nothing is earned
+      without tracking and no episode can profit by ending early -- which made
+      the flat crash penalties redundant, and they are gone. See
+      [docs/reward-shaping.md](docs/reward-shaping.md).
 * [ ] **Move off the Alpha classifier** once the others above are settled.
 
 ### Known gaps

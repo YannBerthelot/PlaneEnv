@@ -57,6 +57,21 @@ Two caveats worth knowing before you re-tune anything:
   is not automatically better than what is shipped. Measure both before keeping
   one: re-running the tuner over the whole registry produced a genuinely better
   `cstr` and a distinctly worse `first_order` in the same pass.
+- **Check the winner is not the last point in the grid.** The glass furnace's
+  search is a grid over (Kp, Ki, Kd), and it returned `Kp=0.040` -- the largest
+  value in `kp_grid`, with the score rising monotonically across the entire Kp
+  column right up to it. That is the signature of a boundary solution, not an
+  optimum, and it is invisible in the output unless you compare the winner
+  against the grid's own bounds. Probing outward found the real turn at
+  `Kp~5`, roughly 125x further out, and `Ki` was then pinned at *its* edge as
+  well. Widening both grids moved the furnace PID from 144.1 to 149.1 over ten
+  seeds. The grids now bracket their optima on both sides, and the chosen
+  `Ki=0.15` was verified interior by direct probe rather than assumed.
+
+  Beware the interaction: `Ki` and `Kd` had been chosen while `Kp` was pinned,
+  so all three had to be re-examined at the new operating point rather than
+  just the one that hit the wall.
+
 - **The aircraft are tuned by coordinate descent, not by the relay.** Both of the
   other methods fail on these plants, and structurally rather than by bad luck:
   the relay reports *"every operating point failed (no zero-crossings)"* because
@@ -88,6 +103,10 @@ Two caveats worth knowing before you re-tune anything:
   | plane3d_heading | 60.93 | 80.25 | +32% |
   | plane3d_circle | 67.23 | 84.59 | +26% |
   | plane3d_figure8 | 34.15 | 81.58 | +139% |
+
+  Those four returns were measured under the previous reward, which charged a
+  flat -200 for a crash; the ratios are what the table is for, and the gains
+  themselves were re-checked against the current reward and did not move.
 
 ## MPC
 
@@ -193,48 +212,63 @@ battery (-27.5%) are caught; the glass furnace is *not*, and that is the
 contract's honest limit -- its bug costs -17.6% over ten seeds but only -4.4%
 over five, against +3.7% when fixed, and no sane threshold separates those.
 Subtle objective errors are below its resolution; this table is what finds
-them. Two aircraft are recorded as `EnvSpec.mpc_degraded` and
+them. Those three percentages were measured under the previous reward and have
+not been re-derived -- reverting each fix again costs hours and would restate a
+conclusion about the contract's *resolution*, which the reward change does not
+alter. Two aircraft are recorded as `EnvSpec.mpc_degraded` and
 xfail with their measured reasons, so a known gap is explicit rather than
 absent.
 
 ## MPC against PID, ten seeds
 
-Return, paired per seed, on each environment's own episode.
+Return, paired per seed, on each environment's own episode. Every number here
+was re-measured after the reward unification -- returns are not comparable
+across that change, so the previous table was discarded rather than patched.
 
-| | MPC vs PID | |
-| --- | --- | --- |
-| plane3d_figure8 | **+450** | |
-| reactor | **+505** | 10/10 |
-| plane3d_heading | **+242** | |
-| plane3d_circle | +201 | |
-| plane | +42 | |
-| boiler_drum | +83 | 10/10 |
-| four_tank | +69 | 10/10 |
-| ph_neutralization | +29 | 10/10 |
-| cement_kiln | +27 | 10/10 |
-| hvac | +18 | 10/10 |
-| distillation | +13 | 10/10 |
-| cstr, first_order | +0.4, +0.2 | 10/10 |
-| glass_furnace | -3.1 (median **+1.7**) | 7/10 |
-| wind_turbine | -0.4 | 6/10 |
-| battery | +7.5 (median -11) | 1/10 |
+Both the mean and the median are given. They disagree on two rows, in opposite
+directions, and either one alone would misreport the pair.
 
-The MPC is the upper bound on thirteen of the sixteen, level on the glass
-furnace and the wind turbine, and behind only on the battery.
+| environment | mean | median | seeds won |
+| --- | --- | --- | --- |
+| plane3d_figure8 | **+450.8** | +449.6 | 10/10 |
+| plane3d_heading | **+236.9** | +314.1 | 8/10 |
+| plane3d_circle | +195.8 | +202.9 | 8/10 |
+| four_tank | +56.9 | +64.6 | 10/10 |
+| boiler_drum | +51.4 | +54.9 | 10/10 |
+| plane | +33.8 | +30.2 | 8/10 |
+| ph_neutralization | +33.4 | +29.8 | 9/10 |
+| distillation | +29.2 | +26.6 | 10/10 |
+| reactor | +26.6 | +28.1 | 10/10 |
+| wind_turbine | +11.8 | +13.9 | 9/10 |
+| cement_kiln | +9.4 | +9.3 | 10/10 |
+| hvac | +8.4 | +8.4 | 10/10 |
+| cstr | +5.3 | +4.5 | 10/10 |
+| first_order | +2.5 | +2.3 | 10/10 |
+| glass_furnace | -7.0 | -5.2 | 2/10 |
+| battery | +14.0 | **-4.1** | 1/10 |
 
-The four aircraft margins are quoted without a win count, deliberately. The MPC
-column there is unchanged -- nothing about those controllers moved -- but the PID
-column was re-measured after the aircraft gains were re-tuned, and it rose
-sharply: plane 362 -> 486, heading 104 -> 190, circle 119 -> 165, figure-8 50 ->
-130. The margins above are the difference of the two means, which is exact; the
-per-seed win counts would need the MPC column re-run, which costs hours and would
-say nothing new about the MPC. The direction is what matters and it did not
-change -- the MPC still leads on all four -- but the 2D aircraft's lead is now
-+42 rather than +166, and a better PID would close it.
+The MPC is the upper bound on **fourteen of the sixteen**, and behind on the
+glass furnace and the battery. Both shortfalls are inside the contract's 10%
+tolerance (4.7% and 2.6%), so this is a documented gap rather than a failure.
 
-Read the last three rows carefully. The battery's positive mean is carried by a
-single seed where lookahead pays enormously (358 against 165) while it trails on
-the other nine, so a mean alone misreports it.
+**The battery's mean is the wrong statistic.** It is carried by a single seed
+where lookahead pays enormously -- 350 against the PID's 164 -- while the
+controller trails on the other nine for a median of -4.1 and one win in ten.
+Horizon, iterations and step size were all swept without closing it.
+
+**The glass furnace lost this row to a better opponent, not to a regression.**
+Its MPC is unchanged and scores exactly what it scored before (142.09). What
+moved was the PID: its gains had been pinned at the edge of the tuner's search
+grid, and widening the grid took it from 144.1 to 149.1. That was enough to
+turn a split -- MPC ahead on 7 of 10 seeds -- into a clear PID win at 2 of 10.
+Strengthening a baseline is supposed to be able to do this, and reporting the
+flip is the point of tuning the baseline honestly in the first place.
+
+The aircraft rows now carry win counts. The previous table quoted their margins
+as a difference of means with no per-seed count, because the PID column had been
+re-tuned while the MPC column had not, and re-running the MPC cost hours. Both
+columns are current here, so the counts are real: the MPC leads on all four, on
+8 of 10 seeds for three of them and 10 of 10 for the figure-8.
 
 **The aircraft rows are the second measurement.** On the previous dynamics the
 2D plane scored -171 and the 3D heading task -34, each winning most seeds and
@@ -248,12 +282,24 @@ enough to fly into the ground. At two substeps both controllers win 10 of 10
 with no terminations at all.
 
 The machinery was then re-measured rather than left to rot. The 2D aircraft's
-terminal cost still earns its place -- five seeds out of five with it, four
-without, and 61 more return -- so it stays. Its stall-margin barrier does not:
-it adds 1.3%, inside this machine's noise, and it existed only to fight the
-crashes, so it has been removed. The wind turbine's overspeed barrier and the
-battery and furnace surrogates are untouched, because those fixed defects that
-were real and remain fixed.
+terminal cost -- `n_tail=60`, which holds the last action and scores the flight
+that follows -- still earns its place: five seeds out of five with it, four
+without, and 61 more return. Those figures predate the reward unification, but
+the argument for it got *stronger*, not weaker. Removing the environment's flat
+crash charge means forgone reward is now the entire cost of a crash, and a
+planner can only see forgone reward by looking past its own horizon. Its
+stall-margin barrier does not earn its place: it adds 1.3%, inside this
+machine's noise, and it existed only to fight the crashes, so it has been
+removed.
+
+The wind turbine's overspeed barrier and the battery and furnace surrogates
+were re-verified against the new reward rather than assumed. The barrier is
+still the difference between controlling and tripping (172.1 with it, 52.4
+without, and 6 of 6 episodes ending early on the overspeed trip). The two
+surrogates survive for a reason that changed: they were written to route around
+a clipped tracking term that was exactly flat outside its band, and no reward in
+the library has such a term any more. Log-scaling fixes the *value*, though, not
+the gradient -- see "The MPC objective is not the reward" below.
 
 Two seeds would misreport almost everything. Measuring on two produced three
 wrong conclusions during this work -- the wind turbine at "98% of the PID", the
@@ -311,6 +357,29 @@ An MPC objective must share the reward's *minimiser*, not its shape. Copying a
 clipped tracking reward gives the optimiser no gradient exactly where it is
 needed; dropping the clip makes large errors score better than they should.
 Both failures happened here before the objectives became plain quadratics.
+
+Unifying the rewards on a log scale removed every clipped plateau, so the
+obvious next step was to delete the two surrogates and let the planners descend
+the reward itself. Measured, that is clearly wrong: the turbine scores 341.9 on
+its surrogate against 172.1 on the reward, with the same barrier in both.
+
+The reason is worth stating, because it is a property of log-scaled rewards in
+general and not a defect in these two plants. A log-scaled reward is
+scale-free in *value* -- every halving of the error is worth the same increment,
+which is exactly what makes it good to learn from. Its gradient is not
+scale-free. Differentiating
+
+    r(e) = 1 - log1p(e / floor) / log1p(envelope / floor)
+
+gives `-1 / ((floor + e) * log1p(envelope / floor))`, which decays like `1/e`:
+the pull toward the setpoint is *weakest* precisely where the controller is
+furthest from it. A quadratic in the normalised error has the same minimiser and
+a gradient that instead grows with the error.
+
+So the surrogates are no longer workarounds for a broken reward. They are
+planner-side reformulations of a reward that is now correct -- which is an
+ordinary thing for an MPC to carry, and the distinction matters for anyone
+reading them as evidence that the reward needs fixing.
 
 The cement kiln is the clearest case for choosing the implementation to fit the
 plant: its free lime depends on temperature through a 280 kJ/mol Arrhenius term

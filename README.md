@@ -503,25 +503,54 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       of a converged trajectory: at one substep the altitude was 20 m out over
       150 steps, against a reward that resolves to 1 m.
 * [ ] **Apply the model review checklist to the other environments.** The
-      aircraft work produced eleven checks in
+      aircraft work produced twelve checks in
       [docs/model-review-checklist.md](docs/model-review-checklist.md), derived
-      from real defects rather than from good intentions. Running check 1 alone
-      found the same envelope-normalised reward in the three 3D aircraft tasks
-      and in the patrol lead term, all since converted; fixing it then exposed
-      check 11 (the figure-8 was scoring its own discretisation) and, underneath
-      that, two guidance laws that do not hold their path.
-* [ ] **A reward-shaping phase.** The rewards were written per environment as
-      each was added, and the shaping conventions have drifted -- Gaussian
-      versus quadratic tracking terms, differing crash penalties, differing
-      treatment of the target band. A learned policy's score is only comparable
-      across environments if the shaping is coherent, and `plane-reward-exponent`
-      (a tracking exponent of 10 versus 2, a pseudo-Huber cost) is unfinished
-      work in exactly this area.
+      from real defects rather than from good intentions. All twelve have now
+      been run across all eighteen environments.
+
+      The pass so far: check 3 found two write-only state fields a hand review
+      had missed; check 9 found the bank-commanded loop gain varies 2.38x on the
+      figure-8, and that removing it changes nothing measurable; check 10's own
+      advice cleared the integrator in one run. The circle's path-following
+      failure turned out not to be a guidance fault at all -- a third of its
+      radius range is unflyable at the cruise speed its autopilot holds, and
+      trading speed for radius took the worst seed from 1860 m to 73 m, closing
+      half of a long-standing strict xfail. Check 12 exists because the first
+      version of that fix edited one of *three* copies of the same control law
+      and measurably did nothing.
+
+      Checks 5, 7 and 8 each needed a plant-agnostic form to be run at all, and
+      each needed its first metric discarded. Check 5 is now done by autodiff:
+      comparing the two one-sided Jacobians of a step tells a kink from a steep
+      curve, which comparing sample-to-sample steps cannot -- that ranked
+      Arrhenius above every real seam. Check 7 became an unforced run, with
+      linear growth separated from accelerating growth so that an aircraft is
+      not flagged for flying forwards. Both come back clean: no plant produces
+      energy from its own equations, and the only seams that survive refinement
+      are a mass clamped at zero, a power limit binding, and one in the aircraft
+      at 308 m/s that full actuator travel cannot reach.
+
+      Checks 3, 4, 5, 7 and 8 now run in
+      [the conformance suite](tests/test_env_conformance.py) against every
+      registered environment, each with an allowlist so it reports *new*
+      defects rather than restating known-benign ones. A new environment
+      inherits them by adding one line to the registry.
+* [x] **A reward-shaping phase.** The rewards had been written per environment as
+      each was added, and the conventions had drifted -- Gaussian versus
+      quadratic tracking terms, differing crash penalties, differing treatment
+      of the target band, and four environments whose reward was *identically
+      zero* across the first three halvings of their error. All eighteen now
+      share one contract: `(tracking terms, multiplied) x (1 - weighted costs)`,
+      bounded in `[0, 1]`, log-scaled around a floor taken from each plant's own
+      instrumentation. Costs multiply rather than subtract, so nothing is earned
+      without tracking and no episode can profit by ending early -- which made
+      the flat crash penalties redundant, and they are gone. See
+      [docs/reward-shaping.md](docs/reward-shaping.md).
 * [ ] **Move off the Alpha classifier** once the others above are settled.
 
 ### Known gaps
 
-The test suite records these rather than hiding them -- six `strict` xfail
+The test suite records these rather than hiding them -- five `strict` xfail
 cases, from two markers, plus the patrol baseline notes above:
 
 * **Plane Patrol expert quality**: both patrol variants now ship a PID, but it

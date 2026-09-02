@@ -238,7 +238,6 @@ def check_no_nan(x, id=None):
 def compute_reward(state: PlaneState, params: PlaneParams, xp=jnp):
     """Return reward for a given state. Safe for JIT."""
     xp = jnp
-    done_alt = xp.logical_or(state.z <= params.min_alt, state.z >= params.max_alt)
     # Log-scaled tracking: every halving of the error is worth the same, so
     # holding 1 m is rewarded over 2 m exactly as much as 100 m is over 200 m.
     # The altitude envelope only normalises the result into [0, 1]; unlike the
@@ -250,7 +249,13 @@ def compute_reward(state: PlaneState, params: PlaneParams, xp=jnp):
         params.max_alt - params.min_alt,
         xp,
     )
-    return xp.where(done_alt, -1.0 * params.max_steps_in_episode, tracking)
+    # No explicit crash penalty. Termination already costs the agent every
+    # step it would otherwise have earned, and since the reward is
+    # non-negative everywhere that is strictly worse than flying on. A
+    # large negative spike bought nothing the forgone reward did not, and
+    # left this family on a different contract from the twelve process
+    # plants, which have always relied on forgone reward alone.
+    return tracking
 
 
 def get_obs(state: PlaneState, xp=jnp):

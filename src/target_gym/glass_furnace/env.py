@@ -64,7 +64,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 SIGMA_SB = 5.670374419e-8  # Stefan-Boltzmann (W m^-2 K^-4)
 KELVIN_OFFSET = 273.15  # °C -> K
@@ -147,7 +147,10 @@ class GlassFurnaceParams(EnvParams):
     T_ambient: float = 25.0  # °C
 
     # ---- Operating / termination bounds ----
-    T_crown_min: float = 1427.0  # °C, incomplete melting
+    T_crown_min: float = 1427.0
+    precision_floor: float = (
+        1.0  # K, type-B thermocouple resolution at 1600 K  # °C, incomplete melting
+    )
     T_crown_max: float = 1677.0  # °C, refractory damage
     T_glass_min: float = 900.0
     T_glass_max: float = 1727.0
@@ -585,12 +588,25 @@ def check_is_terminal(state: GlassFurnaceState, params: GlassFurnaceParams, xp=j
 
 
 def compute_reward(state: GlassFurnaceState, params: GlassFurnaceParams, xp=jnp):
-    """Squared-normalised crown tracking minus a normalised fuel cost."""
+    """Crown-temperature tracking minus a normalised fuel cost.
+
+    Tracking is log-scaled (``utils.log_scaled_reward``): every halving of the
+    error is worth the same increment, from the plant's operating envelope down
+    to ``precision_floor``, the finest error its instrument can resolve. Below
+    that the reward stops paying, because further "improvement" is noise.
+
+    This replaced a clipped squared band, which was flat -- exactly zero, no
+    gradient -- for any error outside the band, and which stopped
+    discriminating just where a good controller operates. See
+    docs/reward-shaping.md.
+    """
     err = xp.abs(state.target_T_crown - state.T_crown)
-    tracking = xp.clip(1.0 - err / params.tracking_scale, 0.0, 1.0) ** 2
+    tracking = log_scaled_reward(
+        err, params.precision_floor, params.T_crown_max - params.T_crown_min, xp
+    )
     fuel_span = params.fuel_max - params.fuel_min
     fuel_norm = (state.fuel_flow - params.fuel_min) / fuel_span
-    return tracking - params.fuel_cost_weight * fuel_norm
+    return tracking * (1.0 - params.fuel_cost_weight * fuel_norm)
 
 
 def specific_energy_consumption(state: GlassFurnaceState, params: GlassFurnaceParams):

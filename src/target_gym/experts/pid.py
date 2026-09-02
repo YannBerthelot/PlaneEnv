@@ -2371,8 +2371,9 @@ class _AirspeedChannel:
     def reset(self):
         self._integral = 0.0
 
-    def __call__(self, speed):
-        err = self.target_speed - speed
+    def __call__(self, speed, target_speed=None):
+        target = self.target_speed if target_speed is None else target_speed
+        err = target - speed
         self._integral = self._integral + err * self.dt
         power = self.cruise_power + self.Kp * err + self.Ki * self._integral
         clipped = np.clip(power, -1.0, 1.0)
@@ -2412,7 +2413,13 @@ class StatefulCascadedPlane3DPID:
 
         stick = self.vertical(target_altitude - z, z_dot, theta, theta_dot, gamma, phi)
         speed = np.sqrt(obs[..., 0] ** 2 + obs[..., 1] ** 2 + 1e-9)
-        power = self.airspeed(speed)
+        # A level coordinated turn needs tan(phi) = V^2/(g R), so a radius the
+        # aircraft cannot hold at cruise is not a guidance failure -- it is a
+        # speed that was never traded for it. Lateral laws that fly a commanded
+        # radius report the fastest speed that radius admits; the rest leave the
+        # airspeed target alone.
+        limit = getattr(self.lateral, "speed_limit", None)
+        power = self.airspeed(speed, None if limit is None else limit(obs))
         aileron = self.lateral(obs, phi, phi_dot)
         return np.stack([power, stick, aileron], axis=-1)
 
@@ -2460,8 +2467,23 @@ class _HeadingLateral:
         return aileron
 
 
+# Fraction of the bank limit a steady turn may use, leaving the rest as control
+# authority for the radial correction that sits on top of the feedforward.
+_TURN_BANK_MARGIN = 0.85
+
+
 class _CircleLateral:
-    """Coordinated-turn feedforward plus a radial-error correction."""
+    """Coordinated-turn feedforward plus a radial-error correction.
+
+    Also publishes the airspeed its commanded radius admits. Without that the
+    task is infeasible over part of its own parameter range: at the shipped
+    ``target_radius_range`` of 8-12 km and a 230 m/s cruise, every radius below
+    9.34 km demands more than the 30 deg bank limit. Measured over three seeds,
+    the one that drew 8.42 km needed 33.8 deg, sat pinned at the bank limit for
+    100% of the episode and settled 1860 m from the circle, against 31 m and
+    52 m for the two that drew 11.3 km and were inside the envelope. Trading
+    speed for radius -- which is what a pilot does -- takes that seed to 73 m.
+    """
 
     def __init__(
         self,
@@ -2482,6 +2504,12 @@ class _CircleLateral:
     def reset(self):
         self._int = 0.0
         self._prev = 0.0
+
+    def speed_limit(self, obs):
+        """Fastest speed at which this radius is flyable with bank in hand."""
+        radius = np.maximum(obs[..., 13], 1.0)
+        usable = _TURN_BANK_MARGIN * self.max_bank_rad
+        return np.sqrt(self.gravity * radius * np.tan(usable))
 
     def __call__(self, obs, phi, phi_dot):
         speed_sq = obs[..., 0] ** 2 + obs[..., 1] ** 2 + 1e-6

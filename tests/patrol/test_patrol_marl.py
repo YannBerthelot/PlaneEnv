@@ -127,7 +127,9 @@ class TestCollision:
         state = state.replace(wingmen=(w0,) + state.wingmen[1:])
         reward, terminated = env._reward_and_terminal(state, params)
         assert bool(terminated)
-        assert float(reward) < 0.0
+        # Ending the episode is the punishment; the reward itself stays in its
+        # contract range. See compute_reward_patrol for the reasoning.
+        assert 0.0 <= float(reward) <= 1.0
 
 
 class TestCooperativeSolution:

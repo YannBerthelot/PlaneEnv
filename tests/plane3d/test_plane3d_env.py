@@ -192,8 +192,20 @@ class TestHeadingReward:
         _, state = env.reset(key)
         params = PlaneParams3D()
         state = state.replace(z=-1.0)
-        reward = compute_reward_heading(state, params)
-        assert float(reward) < -100
+        reward = float(compute_reward_heading(state, params))
+        # There is no crash penalty any more. Termination costs the agent every
+        # step it would have earned, and because the reward is non-negative
+        # everywhere that is already strictly worse than flying on. What the
+        # reward must do here is stay inside its contract.
+        assert 0.0 <= reward <= 1.0
+        # Being outside the envelope is still the worst place to be: it scores
+        # below what holding the target scores.
+        on_target = float(
+            compute_reward_heading(
+                state.replace(z=state.target_altitude, psi=state.target_heading), params
+            )
+        )
+        assert reward < on_target
 
 
 # ─── Circle task ───────────────────────────────────────
@@ -616,30 +628,39 @@ class TestLemniscateDistanceResolution:
             ), f"{offset} m vertical offset measured as {dist:.3f} m"
 
 
-_PATH_FOLLOWING_XFAIL = (
-    "The path guidance laws do not hold their path. Over three laps the circle "
-    "expert wanders 640-1670 m from an 8.4 km circle without ever settling, and "
-    "the figure-8 expert is 6-12 km from a curve whose lobes are 8.4 km across, "
-    "i.e. not following it at all. Their altitude loops are fine (0.2-1.5 m), "
-    "which is what the tuning runs measured; the cross-track error was never "
-    "measured. Nothing else sees this: every other test runs the 200-step "
-    "episode from EnvSpec.test_params, which is 200 s against a 264 s lap, and "
-    "the aircraft is initialised exactly on the path -- so a controller that "
-    "simply flies straight ahead looks correct for the whole episode. This is a "
-    "guidance-law fault, not a gains fault (see docs/model-review-checklist.md "
-    "check 10), and is tracked as an open item there."
+_FIGURE8_PATH_XFAIL = (
+    "The figure-8 expert does not hold its curve: over three laps it settles "
+    "1.3-2.7 km from a lemniscate whose lobes are 8.4 km across. Its altitude "
+    "loop is fine, which is what the tuning runs measured; the cross-track "
+    "error was never measured. Nothing else sees this: every other test runs "
+    "the 200-step episode from EnvSpec.test_params, which is 200 s against a "
+    "264 s lap, and the aircraft starts exactly on the path -- so a controller "
+    "that simply flies straight ahead looks correct for the whole episode. "
+    "The circle half of this was a *feasibility* fault and is now fixed (see "
+    "docs/model-review-checklist.md check 9). This half is not: the MPC holds "
+    "the same curve to 0.5 m on the same episode, so the target is reachable "
+    "and the aircraft permits the manoeuvre -- it is this guidance law that "
+    "cannot fly it. Ruled out by measurement, each reverted after it failed to "
+    "help: the integrator (identical at rk4_2/4/8), the 1/V loop-gain "
+    "scheduling, a speed schedule (constant 2824 m, curvature-scheduled "
+    "2098 m, against 1779 m for neither), the 25 deg bank limit (1547 m at its "
+    "best, 55 deg) and a coordinated-turn feedforward of the kind the circle "
+    "law has always had (1532 m). What remains untried is the blend itself: "
+    "beyond 5% of the lobe radius it chases the bearing to the nearest curve "
+    "point and ignores the tangent, which is pure pursuit, and pure pursuit "
+    "lags on a curved path by construction."
 )
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(strict=True, reason=_PATH_FOLLOWING_XFAIL)
 @pytest.mark.parametrize(
     "make_env, error_fn",
     [
         (Plane3DCircle, lambda s, p: abs(float(distance_to_circle(s)))),
-        (
+        pytest.param(
             Plane3DFigureEight,
             lambda s, p: float(nearest_point_on_twisted_lemniscate(s, p)[3]),
+            marks=pytest.mark.xfail(strict=True, reason=_FIGURE8_PATH_XFAIL),
         ),
     ],
     ids=["circle", "figure8"],

@@ -397,4 +397,10 @@ def test_reward_falls_to_zero_outside_the_band():
         if prev is not None:
             assert r <= prev + 1e-9, "reward must never increase with error"
         prev = r
-    assert prev == pytest.approx(0.0)
+    # Log-scaled rather than clipped, so a large error scores small but not
+    # exactly zero -- it still carries a gradient home, which a clipped band did
+    # not. Zero arrives only at the full level envelope.
+    assert prev < 0.25
+    span = p.h_max - p.h_min
+    far = FourTankState(h1=0.15 + span, h2=0.20 + span, **base)
+    assert float(compute_reward(far, p)) == pytest.approx(0.0, abs=1e-6)

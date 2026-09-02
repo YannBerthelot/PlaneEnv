@@ -347,7 +347,19 @@ def test_reward_is_clipped_below_at_zero_comfort(params):
         for e in errors
     ]
     assert all(a >= b - 1e-9 for a, b in zip(rewards, rewards[1:])), rewards
-    assert rewards[-1] == pytest.approx(0.0, abs=1e-9)
+    # Log-scaled, so 12 K out still scores something and still points home; the
+    # old clipped band was exactly zero there, leaving a controller that far off
+    # with no gradient at all. Zero arrives at the temperature envelope.
+    assert 0.0 < rewards[-1] < 0.3
+    envelope = float(
+        compute_reward(
+            state.replace(
+                T_air=params.T_air_max, target_T=params.T_air_min, Q_emitter=0.0
+            ),
+            params,
+        )
+    )
+    assert envelope == pytest.approx(0.0, abs=1e-6)
 
 
 def test_energy_use_reduces_reward(params):

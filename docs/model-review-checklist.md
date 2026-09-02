@@ -51,10 +51,14 @@ there until fuel burn made mass load-bearing.
 **How to check.** For each `*State` dataclass, count attribute reads of each
 field across the package. Automatable in about fifteen lines.
 
-**What it finds here.** Two fields are written and never read — `hvac.T_surface`
-and `glass_furnace.T_stack`. Both are documented as algebraic or diagnostic, so
-neither is a defect. The check is still worth keeping: it is cheap, and the one
-time it mattered it would have caught a 20-tonne error.
+**What it finds here.** Four fields, once the scan was actually run rather than
+eyeballed: `hvac.T_surface`, `glass_furnace.T_stack`, `hvac.Q_command` and
+`wind_turbine.torque_cmd`. All four are benign, and the last two in an
+instructive way — the *local* variable of that name carries the value into the
+dynamics, and the state field is only a record of what was commanded. So the
+scan's hit rate is poor and its cost is a few seconds; keep it, but read every
+hit before believing it. The one time it mattered it would have caught a
+20-tonne error.
 
 ## 4. Is any state discarded where it is unpacked?
 
@@ -65,8 +69,11 @@ aircraft had no pitch damping and a departed airframe tumbled indefinitely.
 **How to check.** `grep` for `_` in tuple unpacking of state vectors, then ask
 whether the physics genuinely does not depend on it.
 
-**What it finds here.** Only position components (`x`, `y`), which the dynamics
-correctly do not depend on. No remaining rate is discarded.
+**What it finds here.** Three sites across the package, and all three are
+correct: `x` in the 2D dynamics, `x` and `y` in the 3D dynamics — which the
+equations of motion genuinely do not depend on — and a `lax.scan` carry in
+`utils.py`. No rate is discarded anywhere. Now verified mechanically rather
+than by reading.
 
 ## 5. Do the regimes join?
 
@@ -83,6 +90,58 @@ defect infinity.
 **What it applies to.** Any plant assembled from more than one description:
 laminar and turbulent, charging and discharging, calcining and inert, boiling
 and single-phase. Most of these environments have such a seam.
+
+**Do this with autodiff, not finite differences.** The prescription above --
+"measure the largest step against the typical step" -- cannot tell a kink from a
+steep curve, and run across all eighteen it ranked the cstr first at a ratio of
+8.5e18. That is not a discontinuity, it is Arrhenius: the metric flags any
+function whose derivative *grows*, and an exponential does that perfectly
+smoothly.
+
+Every plant here is differentiable, so ask the dynamics instead of sampling
+them. At a point `x`, take the exact Jacobian of one step just below and just
+above it:
+
+    jump(x) = |J(x+eps) - J(x-eps)| / (|J(x+eps)| + |J(x-eps)|)
+
+For *any* smooth function, however steep, the two one-sided derivatives converge
+to the same value and `jump` falls to zero with `eps`. Across a genuine kink
+they converge to different values and `jump` holds. It is scale-free, so a plant
+whose derivative spans twenty orders of magnitude is not penalised for having
+one; and `jnp.where` switches are caught precisely *because* autodiff returns
+the selected branch's derivative. The thing that makes autodiff "wrong" at a
+seam is what makes it a detector for one. Shrinking `eps` by 4x settles each
+case: a smooth point decays with it, a seam does not.
+
+Two filters make the output readable. Score only where the increment is real --
+where a field is unaffected by the swept variable, both derivatives are float
+noise and their ratio is meaningless. And require *both* one-sided derivatives
+to be active: where one is exactly zero the ratio is 1 by construction, and that
+is a **saturation**, a clip on an action or a rate, not two physical
+descriptions failing to join. Every environment clips something, so scoring
+those buries what the check is for.
+
+**What it finds here.** Nine candidates across eighteen environments, and most
+are benign:
+
+| environment | seam | `jump` | held under refinement |
+| --- | --- | --- | --- |
+| aircraft (all four) | `x_dot` near 308 m/s | 1.00 | yes |
+| `battery` | `soc` near 0.115 | 1.00 | yes |
+| `reactor` | `T_fuel` near 718 K | 0.89 | yes |
+| `glass_furnace` | `T_crown` near 1527 K | 0.17 | yes |
+| `boiler_drum` | `pressure` | 0.20 | **no** (0.45) -- smooth |
+| `wind_turbine` | `v_wind` | 0.12 | **no** (0.54) -- smooth |
+
+The furnace's is `m_batch = jnp.maximum(position[3], 0.0)`, the batch blanket
+running out -- a mass that cannot go negative, which is a legitimate kink. The
+battery's is its state-of-charge-dependent power limit binding. The boiler drum
+and wind turbine decay under refinement and are simply steep.
+
+The aircraft's is the one that needed checking, and it is **outside the
+reachable state space**: it sits at 308 m/s, and holding every actuator hard
+over from cruise reaches 251.5 m/s on the 2D aircraft and 285.8 m/s on the 3D
+one before the episode ends. A sustained dive is the case this does not cover.
 
 ## 6. Is the model still physical where an optimiser can drive it?
 
@@ -111,6 +170,26 @@ and tests the integrator rather than the physics.
 conserved quantity — charge for the battery, enthalpy for the thermal plants,
 neutrons for the reactor.
 
+**How to run it without naming each plant's energy.** Hold the actuator at zero
+and let the plant run. With nothing being supplied, nothing may grow without
+bound; anything that does is producing energy from its own equations, which is
+the class of defect that let a departed aircraft fall at 300 m/s against an
+implied terminal velocity of 767.
+
+The trap is that growth alone proves nothing. The first run of this flagged all
+four aircraft, because position grows -- the aircraft flies forward -- and
+flagged the battery, because cumulative capacity fade counts upward. Both are
+integrators, not instabilities. What separates them is whether the growth is
+linear or accelerating: compare the mean increment over the last fifth of the
+run against the first. An integrator holds near 1; an unstable mode runs away.
+
+**What it finds here.** Nothing, which is the answer worth having. Over 3000
+unforced steps no environment accelerates: the largest is the glass furnace's
+`T_work` at 3.25x and the circle task's `psi` at 2.40x, both far below anything
+suggesting an unbounded mode, and the rest sit near 1. Five plants are driven by
+an exogenous input -- wind, dispatch, weather, a manoeuvring lead -- and are not
+unforced even at zero action, so they are marked rather than scored.
+
 ## 8. Is actuator authority validated, or merely plausible?
 
 **What went wrong.** The aileron moment applied the *wing's* lift-curve slope to
@@ -124,6 +203,34 @@ a published figure.
 
 **What it applies to.** Valve authority, heater duty, pump head, rod worth —
 any actuator whose gain was written down rather than derived.
+
+**The plant-agnostic form** is a time constant. Hold the actuator hard over from
+reset and measure how far it drives the tracked variable and whether it destroys
+the plant. Both tails are suspicious: an actuator that can trip the plant in a
+few steps leaves the episode decided before the controller has acted, and one
+that cannot move it is decorative.
+
+**What it finds here.** No environment is inert -- every actuator moves its
+tracked variable -- but the margin varies by three orders of magnitude, and two
+plants are startlingly twitchy:
+
+| environment | steps to trip at full travel | in seconds |
+| --- | --- | --- |
+| `boiler_drum` | **3** | 6 s |
+| `wind_turbine` | 11 | 2.75 s |
+| aircraft (3D) | 27 | 27 s |
+| `hvac` | 56 | 14 h |
+| `distillation` | 231 | 231 s |
+| `glass_furnace` | 3162 | 53 min |
+| `cstr`, `first_order`, `ph_neutralization` | never | -- |
+
+The boiler drum trips on `|level| >= 0.25 m` at `dt = 2 s`, so a saturated
+feedwater valve destroys it in six seconds out of a 400-step episode. That is
+not obviously wrong -- drum shrink-and-swell really is that fast, and the drum
+is meant to be one of the hardest environments here -- but it does mean a
+controller that saturates has already lost, which is worth knowing before
+reading a poor score as a tuning problem. The three plants that cannot be
+tripped at all are the three simplest, as expected.
 
 ## 9. Does a control loop's gain depend on an operating variable?
 
@@ -139,6 +246,78 @@ or load.
 **What it applies to.** Any cascade. Gain-scheduled controllers are already
 acknowledging this; the ones that are not scheduled are the ones to look at.
 
+**What it finds here.** The other three aircraft lateral loops still command
+bank, so the defect is present in all of them. Measuring the speeds each task
+actually flies puts a number on it: heading and circle range 201-244 m/s for a
+1.22x gain swing, and the figure-8 ranges 96-228 m/s for **2.38x** — larger than
+the 45% swing that was judged worth fixing on patrol.
+
+**And converting them changed nothing.** Applying patrol's exact fix to all
+three — command a turn rate, invert `g*tan(phi)/V`, clip the rate rather than
+the bank — moved the three-lap path error by less than 1% and the ten-seed
+returns by less than the seed noise (heading -1.7, circle +0.1, figure-8 +0.9,
+patrol -1.6, against standard deviations of 14-76). It was reverted, on the same
+grounds the aircraft's stall-margin barrier was: a change that measures as
+nothing does not earn its complexity, and here it would have been *five* copies
+of it (see check 12).
+
+That is worth recording as a result rather than quietly dropping, because the
+check is still correct. A 2.38x gain swing is real and would matter to anyone
+re-tuning these loops or training against them. It simply was not what was
+holding the path — which is the lesson of check 10 arriving a second time, and
+this time it was *me* reaching for the nearest plausible structural candidate.
+
+**What was actually wrong with the circle is one line of geometry.** A level
+coordinated turn needs `tan(phi) = V^2/(g R)`. The task samples its radius from
+`target_radius_range = (8000, 12000)` m while the autopilot holds a 230 m/s
+cruise and the bank limit is 30 deg — and the smallest radius that combination
+can fly is **9.34 km**, rising to 10.5 km at the top of the speed band. So a
+third to a half of the environment's own parameter range is unflyable at cruise:
+
+| seed | radius | speed | bank needed | pinned at limit | settled error |
+| --- | --- | --- | --- | --- | --- |
+| 0 | 8.42 km | 235 m/s | **33.8 deg** | **100%** of the episode | 1860 m |
+| 1 | 11.31 km | 230 m/s | 25.5 deg | 0% | 31 m |
+| 2 | 11.46 km | 230 m/s | 25.1 deg | 0% | 52 m |
+
+No guidance law can fix that, and the coin-flip-on-seed signature was check 10
+pointing at a saturation boundary exactly as it says it does. The aircraft can
+fly an 8 km circle — it just has to slow to 213 m/s first, and nothing told it
+to. The circle law now publishes the speed its radius admits and the shared
+airspeed channel holds it, which takes the failing seed from **1860 m to 73 m**
+and lets the strict xfail be narrowed to the figure-8 alone.
+
+**The figure-8's target is reachable; its expert simply cannot fly there.** The
+MPC holds the same curve to **0.5 m** over the same 800-step episode, using up
+to 76.7 deg of bank at 160-204 m/s. The geometry is not asking for a path the
+aircraft cannot fly, so changing the task would be fixing the wrong thing --
+worth stating plainly, because "make the target reachable" is the tempting
+response to a controller that misses by kilometres, and here it would have made
+the benchmark easier while leaving the actual defect in place.
+
+**The same treatment made the figure-8 worse, which is the more interesting
+half.** Its lemniscate has a minimum radius of curvature of `a/3`, so at the
+shipped 8.4 km lobe radius the lobes admit only 114 m/s — and on a fixed
+throttle the aircraft arrives at them having accelerated to 228 m/s. The defect
+is real and quantified. But holding one speed for the whole curve took the
+three-lap error from 1779 m to 2824 m, and scheduling it against local curvature
+(differentiating the observed tangent heading with respect to distance
+travelled) still gave 2098 m. Both were reverted. Speed is *not* the binding
+constraint on that curve. Nor is its bank limit: raising the expert's 25 deg cap
+through 75 deg bottoms out at 1547 m and then gets worse. Nor is a missing
+coordinated-turn feedforward -- the circle law has had one all along and this one
+never did, and adding it, with curvature estimated from the rate of change of
+the observed tangent heading, reaches 1532 m, which is real but does not change
+the outcome, so it went the way of the stall barrier.
+
+Five candidates are now eliminated by measurement rather than argument: the
+integrator, the loop-gain scheduling, the speed schedule, the bank limit and the
+feedforward. What remains untried is the blend at the centre of the law: beyond
+5% of the lobe radius it chases the *bearing to the nearest curve point* and
+ignores the tangent entirely. That is pure pursuit, and pure pursuit lags a
+curved path by construction -- which is the symptom. That is where the next
+attempt should go.
+
 ## 10. What does the tuning objective's behaviour tell you?
 
 **What went wrong.** A gain search on the patrol follower was chaotic — a 0.1 %
@@ -146,6 +325,12 @@ change in one gain moved the objective by a factor of two — and a "best" point
 found in one run scored 2.6x worse when re-evaluated. That was not noise to be
 averaged away: it was the search finding which side of a *saturation* boundary
 each seed fell on.
+
+**What it finds here.** Its own advice, applied to the path-following xfail,
+cleared the integrator immediately: the circle's three-lap error is identical to
+four significant figures at `rk4_2`, `rk4_4` and `rk4_8`, so that trajectory is
+converged and the fault was genuinely downstream. Cheap, and it stopped a second
+integration hunt before it started.
 
 **The lesson.** A well-conditioned search means a genuine gain problem. A
 chaotic one means a structural fault, and tuning will not fix it. The
@@ -188,6 +373,32 @@ buy.
 computed in closed form. The circle task is safe because its distance is
 analytic; the figure-8 was not.
 
+## 12. Is this logic implemented more than once?
+
+**What went wrong.** Check 9's fix was applied to `plane3d_heading_pid_step`,
+`plane3d_circle_pid_step` and `plane3d_figure8_pid_step`, measured, and found to
+change *nothing at all* — the before and after numbers were identical to the
+decimal. Not "within noise": identical. That is not a result, it is a symptom,
+and the cause was that `EnvSpec.make_pid` returns
+`StatefulCascadedPlane3DPID`, a **separate** host-side implementation of the
+same three control laws. The edited functions are real and are used — by
+`env_jax.py`'s `FunctionalExpertPolicy` and by the patrol lead — just not by
+anything the benchmark runs.
+
+The heading law exists in three places, the circle law in three, the figure-8 in
+two. They must agree, and nothing enforces it.
+
+**How to check.** Before editing a control law or a piece of physics, `grep` for
+a distinctive line of it and count the hits. Afterwards, confirm the measurement
+moved: a change that alters *nothing* has usually missed its target, and an
+identical number is much stronger evidence of that than a plausible one.
+
+**What it applies to.** Every environment here has a `env.py` / `env_jax.py`
+pair, and the experts have a traced form and a host-side form. The split is
+deliberate — one is differentiable and jit-friendly, the other is cheap to step
+from Python — so the duplication is not itself the defect. Silently diverging
+is.
+
 ---
 
 ## Open items this produced
@@ -197,20 +408,50 @@ analytic; the figure-8 was not.
   defect, but it is precision-blind in the sense of check 2. `max_slot_error`
   (the error at which the formation is declared lost) is the natural envelope if
   it is converted.
-- **The circle and figure-8 guidance laws do not hold their path.** Found by
-  measuring the tracking error the reward had never been able to see: over three
-  laps the circle expert wanders 640-1670 m from an 8.4 km circle and the
-  figure-8 expert sits 6-12 km from a curve 8.4 km across. Both altitude loops
-  are fine (0.2-1.5 m), which is what the tuning runs measured -- the
-  cross-track error was never measured. Recorded as a strict xfail in
-  `tests/plane3d/test_plane3d_env.py`. By check 10 this is a structural fault,
-  not a gains fault.
+- ~~**The circle and figure-8 guidance laws do not hold their path.**~~ Half
+  resolved. The circle was never a guidance fault at all: a third to a half of
+  its own radius range is unflyable at the cruise speed the autopilot holds, and
+  trading speed for radius takes the failing seed from 1860 m to 73 m. Its half
+  of the strict xfail is now a passing test. **The figure-8 remains open** and is
+  still a strict xfail at 1.3-2.7 km, with the integrator, the loop-gain
+  scheduling and the speed schedule all now ruled out by measurement.
 - **A test episode shorter than the task's own period proves nothing.** These
   tasks are exercised over `max_steps_in_episode=200`, which at `dt = 1 s` is
   200 s against a 264 s lap, and the aircraft is initialised exactly on the
   path -- so a controller that simply flies straight ahead looks correct for the
   whole episode. Every periodic or path-following task needs an episode of
   several periods before any expert-quality claim about it means anything.
-- The reward-shaping phase in the roadmap should apply checks 1 and 2 to every
-  environment with a band or tolerance parameter.
-- Checks 3, 4 and 6 are automatable and could join the conformance suite.
+- ~~The reward-shaping phase should apply checks 1 and 2 to every environment
+  with a band or tolerance parameter.~~ Done: all eighteen now share one
+  log-scaled, bounded reward contract. See `docs/reward-shaping.md`.
+- ~~Checks 3, 4 and 6 are automatable and could join the conformance suite.~~
+  Done, and more than those three. `tests/test_env_conformance.py` now runs
+  checks 3, 4, 5, 7 and 8 against every registered environment, so a new
+  environment inherits them by adding one line to the registry. Checks 3 and 4
+  are repository-wide scans and cost seconds, so they run in the fast job;
+  checks 5, 7 and 8 step or differentiate every plant and are marked `slow`,
+  adding about 100 s to that job.
+
+  Each carries an allowlist -- `KNOWN_WRITE_ONLY_STATE_FIELDS`,
+  `KNOWN_DISCARDED_UNPACKS`, `KNOWN_SEAMS` -- so the tests report *new* defects
+  instead of restating the known-benign ones every run, and so that admitting a
+  finding is a deliberate act with a reason recorded next to it.
+- ~~Checks 5, 7 and 8 have still not been run against the other seventeen
+  environments.~~ Run. All twelve checks have now been applied to all eighteen.
+  Each turned out to have a plant-agnostic form needing no per-plant seam,
+  conserved quantity or actuator figure identified by hand -- autodiff for 5, an
+  unforced run for 7, a hard-over actuator for 8 -- which is why they were
+  cheaper than they looked, and why they should be re-run whenever the dynamics
+  change rather than treated as a one-off audit.
+- **Each of checks 5, 7 and 8 needed its first metric thrown away.** Largest
+  step against typical step ranked Arrhenius above every real seam; growth under
+  zero input flagged four aircraft for flying forwards; and the actuator scan
+  needed the tracked index the runners already use rather than a guess at which
+  state field is the output. In all three the fix was to ask what distinguishes
+  the defect from the benign thing that resembles it -- a kink from a steep
+  curve, an instability from an integrator -- rather than to raise a threshold.
+  A check whose output is a long list is usually measuring the wrong quantity.
+- The seams checks 5 and 8 flagged are recorded but **not resolved**: the
+  aircraft's is outside the reachable envelope only for level flight, and the
+  boiler drum's six-second trip is plausible but unverified against a real drum.
+  Both want a source rather than an argument.

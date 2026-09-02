@@ -103,21 +103,83 @@ closer stops being measurable".
 
 ## Status
 
-Applied to the whole aircraft family: the 2D plane, all three 3D tasks (heading,
-circle, figure-8) and the lead term of the patrol formation, all going through
-one `log_scaled_reward` in `utils.py` rather than four transcriptions of the
-formula. The remaining environments still use their original shapes — two
-Gaussians on bands, the rest assorted forms built on `abs()` — and converting
-them is the reward-shaping phase in the roadmap, not a sweep: each needs its
-floor chosen from that plant's own instrumentation.
+**Every environment now uses this shape.** The aircraft family came first (the
+2D plane, all three 3D tasks, and the lead term of the patrol formation); the
+twelve process and energy plants followed. All of them route through a single
+`log_scaled_reward` in `utils.py` rather than eighteen transcriptions of the
+formula.
 
-Three floors are in use, each a sensor resolution rather than a tolerance:
+Converting the rest was not a sweep. Measuring first turned the phase into a
+list: four environments — the glass furnace, boiler drum, reactor and HVAC —
+scored *identically zero* across the first three halvings of their error, which
+is no gradient at all for a controller far from its setpoint. That is the same
+clipped plateau that had made two MPC baselines give up, still sitting in the
+rewards themselves.
 
-| Floor | Value | Source |
+Each floor is an instrument resolution, never a tolerance:
+
+| Environment | Floor | Source |
 | --- | --- | --- |
-| `precision_floor` | 1 m | barometric altimeter resolution |
-| `heading_precision_floor` | 0.0087 rad (0.5°) | AHRS / compass resolution |
-| `position_precision_floor` | 3 m | civil GPS horizontal accuracy |
+| aircraft (altitude) | 1 m | barometric altimeter resolution |
+| aircraft (heading) | 0.0087 rad (0.5°) | AHRS / compass resolution |
+| aircraft (position) | 3 m | civil GPS horizontal accuracy |
+| `cstr` | 1e-4 mol/L | composition analyser |
+| `first_order` | 6e-3 | generic transmitter span |
+| `four_tank` | 1e-3 m | level transmitter |
+| `ph_neutralization` | 1e-2 pH | glass pH electrode |
+| `distillation` | 1e-4 mole fraction | composition analyser |
+| `glass_furnace` | 1.0 K | type-B/S thermocouple at 1700 K |
+| `reactor` | 1e-4 | neutron flux instrumentation |
+| `hvac` | 0.1 K | room temperature sensor |
+| `cement_kiln` | 5e-4 | free-lime assay |
+| `boiler_drum` | 1e-3 m / 0.05 bar | level transmitter / pressure transmitter |
+| `wind_turbine` | 1e3 W | revenue-grade power metering |
+| `battery` | 1e3 W | revenue-grade power metering |
+
+Envelopes are the span at which the plant is lost, so the reward reaches zero
+exactly where the episode would end — the boiler drum's level trip, the
+reactor's flux limits.
+
+### Costs multiply, they do not subtract
+
+Tracking is not the only thing these plants are scored on: several also pay for
+fuel, reagent, boil-up, pitch activity or cell degradation. Those terms used to
+be *subtracted*, which let two environments score below zero — and a negative
+step reward means ending the episode early beats tracking badly, which inverts
+the entire point of a target MDP.
+
+Adding the cost back as a credit fixes the sign and introduces something worse.
+Measured: switching the HVAC heater off and abandoning the setpoint entirely
+still banked **0.310 every step**, because a term paid independently of the
+target rewards ignoring the target.
+
+A cost is not a second objective competing with the setpoint. It is a
+tiebreaker among ways of *holding* the setpoint, and multiplying says so:
+
+    reward = (tracking terms, multiplied) * (1 - sum of weighted costs)
+
+Bounded in `[0, 1]`; maximised only by holding the target; zero tracking earns
+nothing however little is spent; two controllers that track equally are still
+separated by what they burn. Non-negativity then comes free, so a short episode
+can never beat a long one — which also made the aircraft's flat `-200` crash
+penalty redundant, and it has been removed. Termination already costs every step
+it forgoes.
+
+### The gradient is not scale-free, only the value is
+
+Worth knowing before reusing this shape for anything gradient-based. A
+log-scaled reward is scale-free in *value* — each halving of the error is worth
+the same increment, which is what makes it good to learn from. Its gradient is
+not. Differentiating gives
+
+    dr/de = -1 / ((floor + e) * log1p(envelope / floor))
+
+which decays like `1/e`: the pull toward the setpoint is weakest exactly where
+the controller is furthest from it. For a learner reading returns this is
+fine. For a gradient planner descending the reward directly it is not — the
+wind turbine's MPC scores 341.9 on a quadratic surrogate against 172.1 on the
+reward itself. That is why two MPC baselines still carry surrogate objectives
+sharing the reward's minimiser; see `docs/baselines.md`.
 
 ### What converting the 3D tasks turned up
 

@@ -56,7 +56,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 R_GAS = 8.314
 SIGMA = 5.67e-8
@@ -124,7 +124,10 @@ class CementKilnParams(EnvParams):
     T_ambient: float = 300.0  # K
 
     # -- actuators ------------------------------------------------------------
-    fuel_min: float = 1.20  # kg/s
+    fuel_min: float = 1.2
+    precision_floor: float = (
+        5e-4  # free-lime fraction, laboratory assay resolution0  # kg/s
+    )
     fuel_max: float = 2.40  # kg/s
     rpm_min: float = 2.0
     rpm_max: float = 4.5
@@ -445,14 +448,22 @@ def check_is_terminal(state: CementKilnState, params: CementKilnParams, xp=jnp):
 def compute_reward(state: CementKilnState, params: CementKilnParams, xp=jnp):
     """Free-lime tracking minus fuel.
 
-    A squared-normalised band rather than a Gaussian: it stays informative well
-    outside the band, so a controller that is far off still sees a gradient
-    back toward the setpoint.
+    Tracking is log-scaled (``utils.log_scaled_reward``): every halving of the
+    error is worth the same increment, from the plant's operating envelope down
+    to ``precision_floor``, the finest error its instrument can resolve. Below
+    that the reward stops paying, because further "improvement" is noise.
+
+    This replaced a clipped squared band, which was flat -- exactly zero, no
+    gradient -- for any error outside the band, and which stopped
+    discriminating just where a good controller operates. See
+    docs/reward-shaping.md.
+
     """
     err = xp.abs(discharge_lime(state) - state.target_lime)
-    quality = xp.clip(1.0 - err / params.lime_band, 0.0, 1.0) ** 2
+    # Free lime is a mass fraction, so the envelope is the full [0, 1] range.
+    quality = log_scaled_reward(err, params.precision_floor, 1.0, xp)
     fuel = (state.fuel - params.fuel_min) / (params.fuel_max - params.fuel_min)
-    return quality - params.fuel_weight * fuel
+    return quality * (1.0 - params.fuel_weight * fuel)
 
 
 def specific_heat_consumption(state: CementKilnState, params: CementKilnParams):

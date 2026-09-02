@@ -51,7 +51,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 GAS_CONSTANT = 8.314  # J/(mol K)
 KELVIN = 273.15
@@ -107,6 +107,14 @@ class BatteryParams(EnvParams):
 
     # ---- Reward shaping ----
     power_band: float = 0.15e6  # W, error at which tracking reward reaches 0
+    precision_floor: float = 1e3  # W, revenue-grade power metering resolution
+    # Upper bound on the per-step cost terms, used to keep the reward
+    # non-negative: soc_comfort_weight * max((soc-0.5)^2) = 0.0203 over the
+    # [0.05, 0.95] window, plus degradation_weight * fade at the cell's thermal
+    # limit and full-power current = 0.0081. Worst observed in rollout: 0.0229.
+    max_step_cost: float = 0.03
+    # Fraction of the tracking reward the worst-case cost may discount away.
+    cost_weight: float = 0.1
     degradation_weight: float = 2.0e5  # scales fractional fade into reward units
     soc_comfort_weight: float = 0.10  # gentle pull toward mid charge
 
@@ -316,10 +324,11 @@ def compute_reward(state: BatteryState, params: BatteryParams, xp=jnp):
     """
     p = params
     err = xp.abs(state.target_power - state.power)
-    tracking = xp.clip(1.0 - err / p.power_band, 0.0, 1.0) ** 2
+    tracking = log_scaled_reward(err, p.precision_floor, p.power_max, xp)
     fade = degradation_rate(state.current, state.T_cell, p) * p.delta_t
     headroom = (state.soc - 0.5) ** 2
-    return tracking - p.degradation_weight * fade - p.soc_comfort_weight * headroom
+    cost = p.degradation_weight * fade + p.soc_comfort_weight * headroom
+    return tracking * (1.0 - jnp.clip(cost / p.max_step_cost, 0.0, 1.0) * p.cost_weight)
 
 
 def round_trip_efficiency(power, soc, params: BatteryParams):

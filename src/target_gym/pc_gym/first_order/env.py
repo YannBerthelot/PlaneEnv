@@ -7,7 +7,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 
 @struct.dataclass
@@ -17,6 +17,9 @@ class FirstOrderParams(EnvParams):
     u_min: float = -2.0
     u_max: float = 2.0
     x_min: float = -3.0
+    # Generic dimensionless plant: resolve to a thousandth of the span, which
+    # is finer than any sensor this stands in for.
+    precision_floor: float = 6e-3
     x_max: float = 3.0
 
     target_x_range: Tuple[float, float] = (0.5, 1.5)
@@ -76,6 +79,11 @@ def check_is_terminal(state: FirstOrderState, params: FirstOrderParams, xp=jnp):
 
 
 def compute_reward(state: FirstOrderState, params: FirstOrderParams, xp=jnp):
-    max_diff = params.x_max - params.x_min
-    reward = ((max_diff - xp.abs(state.target_x - state.x)) / max_diff) ** 2
-    return reward
+    # Log-scaled; the previous form normalised by the whole 6.0 envelope and
+    # squared it, so closing the last tenth was worth almost nothing.
+    return log_scaled_reward(
+        xp.abs(state.target_x - state.x),
+        params.precision_floor,
+        params.x_max - params.x_min,
+        xp,
+    )

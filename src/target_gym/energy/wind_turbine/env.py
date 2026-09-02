@@ -49,7 +49,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 RPM_PER_RAD_S = 60.0 / (2.0 * jnp.pi)
 
@@ -108,6 +108,8 @@ class WindTurbineParams(EnvParams):
 
     # ---- Reward shaping ----
     power_band: float = 0.5e6  # W, error at which tracking reward reaches 0
+    precision_floor: float = 1e3  # W, revenue-grade power metering resolution
+    power_envelope: float = 5e6  # W, rated electrical output
     pitch_activity_weight: float = 0.02  # fatigue proxy
 
     # ---- Targets ----
@@ -302,9 +304,9 @@ def compute_reward(state: WindTurbineState, params: WindTurbineParams, xp=jnp):
     """Power tracking minus a pitch-activity penalty (a fatigue proxy)."""
     power = electrical_power(state.omega, state.torque, params)
     err = xp.abs(state.target_power - power)
-    tracking = xp.clip(1.0 - err / params.power_band, 0.0, 1.0) ** 2
+    tracking = log_scaled_reward(err, params.precision_floor, params.power_envelope, xp)
     activity = xp.abs(state.pitch_cmd - state.pitch) / params.pitch_max
-    return tracking - params.pitch_activity_weight * activity
+    return tracking * (1.0 - params.pitch_activity_weight * activity)
 
 
 def available_power(v_wind, omega, params: WindTurbineParams):

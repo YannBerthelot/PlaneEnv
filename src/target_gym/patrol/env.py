@@ -241,11 +241,16 @@ def compute_reward_patrol(state: PatrolState, params: PatrolParams, xp=jnp):
     (``-max_steps_in_episode`` on an irrecoverable state).  The multiplicative
     heading factor makes the target "fly the slot *parallel* to the lead".
     """
-    terminated, _ = check_is_terminal_patrol(state, params, xp)
     err = slot_error(state)
     track_r = xp.exp(-0.5 * (err / params.slot_tolerance) ** 2)
     align_r = heading_alignment(state, params, xp)
-    return xp.where(terminated, -1.0 * params.max_steps_in_episode, track_r * align_r)
+    # No explicit crash penalty. Termination already costs the agent every
+    # step it would otherwise have earned, and since the reward is
+    # non-negative everywhere that is strictly worse than flying on. A
+    # large negative spike bought nothing the forgone reward did not, and
+    # left this family on a different contract from the twelve process
+    # plants, which have always relied on forgone reward alone.
+    return track_r * align_r
 
 
 # ─── Observations ───────────────────────────────────────

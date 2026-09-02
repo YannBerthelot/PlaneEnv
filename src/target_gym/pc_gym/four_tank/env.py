@@ -7,7 +7,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 
 @struct.dataclass
@@ -37,6 +37,7 @@ class FourTankParams(EnvParams):
 
     # Level bounds (m)
     h_min: float = 0.05
+    precision_floor: float = 1e-3  # m, level transmitter resolution (1 mm)
     h_max: float = 1.5
 
     # Tracking band: the level error at which the tracking reward reaches zero.
@@ -190,14 +191,22 @@ def check_is_terminal(state: FourTankState, params: FourTankParams, xp=jnp):
 def compute_reward(state: FourTankState, params: FourTankParams, xp=jnp):
     """Mean of the two level-tracking scores.
 
-    A squared normalised band, clipped, matching the rest of the suite. The
-    clip matters: the previous form squared an unclipped ratio, so an error
-    larger than the band would have started *increasing* the reward again --
-    harmless while the plant could not produce such an error, but the same
-    defect that broke two MPC objectives elsewhere in this repo.
+    Tracking is log-scaled (``utils.log_scaled_reward``): every halving of the
+    error is worth the same increment, from the plant's operating envelope down
+    to ``precision_floor``, the finest error its instrument can resolve. Below
+    that the reward stops paying, because further "improvement" is noise.
+
+    This replaced a clipped squared band, which was flat -- exactly zero, no
+    gradient -- for any error outside the band, and which stopped
+    discriminating just where a good controller operates. See
+    docs/reward-shaping.md.
+
     """
-    e1 = xp.abs(state.target_h1 - state.h1)
-    e2 = xp.abs(state.target_h2 - state.h2)
-    r1 = xp.clip(1.0 - e1 / params.tracking_band, 0.0, 1.0) ** 2
-    r2 = xp.clip(1.0 - e2 / params.tracking_band, 0.0, 1.0) ** 2
+    span = params.h_max - params.h_min
+    r1 = log_scaled_reward(
+        xp.abs(state.target_h1 - state.h1), params.precision_floor, span, xp
+    )
+    r2 = log_scaled_reward(
+        xp.abs(state.target_h2 - state.h2), params.precision_floor, span, xp
+    )
     return (r1 + r2) / 2.0

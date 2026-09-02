@@ -96,7 +96,7 @@ from jax.tree_util import Partial as partial
 
 from target_gym.base import EnvParams, EnvState
 from target_gym.integration import integrate_dynamics
-from target_gym.utils import convert_raw_action_to_range
+from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 
 # ---------------------------------------------------------------------------
 # Standard 6-group U-235 thermal delayed-neutron data (Keepin 1965).
@@ -171,7 +171,10 @@ class ReactorParams(EnvParams):
     rho_Xe_full: float = 0.025  # = 2500 pcm
 
     # ---- Termination / safety bounds ----
-    n_min: float = 0.01  # near-shutdown — SCRAM
+    n_min: float = 0.01
+    precision_floor: float = (
+        1e-4  # relative flux, ex-core detector resolution  # near-shutdown — SCRAM
+    )
     n_max: float = 1.5  # 150 % overpower — SCRAM
     T_fuel_max: float = 1473.0  # K — well below UO2 melting (~3120 K)
     T_fuel_min: float = 500.0
@@ -582,21 +585,33 @@ def check_is_terminal(state: ReactorState, params: ReactorParams, xp=jnp):
 
 
 def compute_reward(state: ReactorState, params: ReactorParams, xp=jnp):
-    """
-    Reward = Gaussian tracking term minus a small rod-motion penalty.
+    """Flux tracking minus a small rod-motion penalty.
 
-    * Tracking : ``exp(-0.5 * (error / band)^2)``  — sharp: 3% error → 0.61,
-      5% → 0.25, 10% → ~0.  This reflects the economic reality where small
-      deviations from grid demand incur steep imbalance penalties.
+    Tracking is log-scaled (``utils.log_scaled_reward``): every halving of the
+    error is worth the same increment, from the plant's operating envelope down
+    to ``precision_floor``, the finest error an ex-core detector can resolve.
+
+    This replaced a Gaussian on ``reward_band``, which was effectively zero --
+    no gradient at all -- beyond about 10% error, and which stopped
+    discriminating just where a good controller operates. See
+    docs/reward-shaping.md.
+
+    ``step_env`` applies ``control_period`` physics sub-steps per environment
+    step and sums their rewards, so one step returns several times a single
+    sub-step value. Returns here are not on the same numeric scale as the other
+    environments; comparisons within this environment are unaffected.
+
     * Rod cost : small penalty for holding rods far from neutral.
     """
     error = xp.abs(state.target_n - state.n)
-    tracking = xp.exp(-0.5 * (error / params.reward_band) ** 2)
+    tracking = log_scaled_reward(
+        error, params.precision_floor, params.n_max - params.n_min, xp
+    )
 
     rho_scale = xp.maximum(xp.abs(params.rho_ext_min), xp.abs(params.rho_ext_max))
     rod_penalty = params.rod_motion_weight * xp.abs(state.rho_ext) / rho_scale
 
-    return tracking - rod_penalty
+    return tracking * (1.0 - rod_penalty)
 
 
 def compute_revenue_rate(state: ReactorState, params: ReactorParams):

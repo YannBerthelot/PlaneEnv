@@ -40,6 +40,10 @@ GROUPS: dict[str, str] = {
 }
 
 
+# Keyed by spec name: EnvSpec is frozen, so the cache lives beside it.
+_ENV_CACHE: dict[str, Any] = {}
+
+
 @dataclass(frozen=True)
 class EnvSpec:
     """Everything the library needs to know about one environment.
@@ -96,6 +100,10 @@ class EnvSpec:
         from ``baselines_note``, which marks a baseline that is absent
         entirely. Surfaced by the conformance suite so a weak expert is a
         recorded, explained gap rather than a silently bad benchmark number.
+    mpc_degraded:
+        The same, for the MPC: set when the MPC exists and runs but returns
+        materially less than the PID, so it is not the upper bound the benchmark
+        presents it as. The reason should carry the measured numbers.
     """
 
     name: str
@@ -108,6 +116,7 @@ class EnvSpec:
     tuned_gains_key: str | None = None
     baselines_note: str | None = None
     expert_degraded: str | None = None
+    mpc_degraded: str | None = None
     effectiveness_overrides: dict[str, Any] = field(default_factory=dict)
     disturbance_fields: tuple[str, ...] = ()
     disturbance_overrides: dict[str, Any] = field(default_factory=dict)
@@ -121,8 +130,30 @@ class EnvSpec:
         return self.make_mpc is not None
 
     def make_env(self):
-        """Instantiate the environment."""
-        return self.env_factory()
+        """The environment for this spec, built once and shared.
+
+        Deliberately not a fresh instance per call. ``env.step_env`` is a *bound
+        method*, so every new instance is a new callable to JAX, which keys its
+        compilation cache on the callable and holds the resulting executable for
+        the life of the process. Building environments in a loop therefore leaks:
+        measured on the 2D aircraft, forty fresh instances retained 104 MB, about
+        2.6 MB apiece, and each one also paid its compile again. Re-wrapping the
+        *same* instance in ``jax.jit`` repeatedly costs nothing, so the instance
+        is what matters.
+
+        Sharing is safe because these environments carry no per-episode state:
+        every field is configuration (``obs_shape``, ``integration_method``,
+        ``observe_wind``), and ``positions_history`` is a render buffer the
+        stepping code never writes. All state lives in the ``EnvState`` passed
+        through each call.
+
+        Anyone constructing an environment directly rather than through the
+        registry should hold onto the instance for the same reason.
+        """
+        cached = _ENV_CACHE.get(self.name)
+        if cached is None:
+            cached = _ENV_CACHE[self.name] = self.env_factory()
+        return cached
 
     def make_test_params(self, **overrides):
         """Parameters for a short test episode, plus any extra overrides."""

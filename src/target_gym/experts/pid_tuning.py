@@ -637,6 +637,7 @@ def tune_plane3d_heading_pid(
     lr: float = 0.02,
     verbose: bool = True,
     n_targets: int = 8,
+    n_steps: int | None = None,
 ):
     """
     Tune heading-task PID: altitude PID (3) + heading PID (3) + bank P (1) = 7 gains.
@@ -651,7 +652,12 @@ def tune_plane3d_heading_pid(
     env = Plane3DHeading()
     params = env.default_params
     # Truncate rollout to avoid NaN gradients from BPTT over 10 000 steps.
-    n_steps = min(int(params.max_steps_in_episode), 2_000)
+    # 2000 steps (~200 s) is enough to evaluate tracking quality while keeping
+    # BPTT gradients stable. Overridable so the smoke test can build,
+    # differentiate and step this loss -- which is where its failures live --
+    # without paying for the full rollout: at the shipped size those three tests
+    # were 149 s of a 1017 CPU-second fast job.
+    n_steps = n_steps or min(int(params.max_steps_in_episode), 2_000)
     dt = float(params.delta_t)
 
     alt_lo, alt_hi = params.target_altitude_range
@@ -764,6 +770,7 @@ def tune_plane3d_circle_pid(
     lr: float = 0.02,
     verbose: bool = True,
     n_targets: int = 6,
+    n_steps: int | None = None,
 ):
     """
     Tune circle-task PID: altitude PID (3) + radial PID (3) + bank P (1) = 7 gains.
@@ -778,7 +785,12 @@ def tune_plane3d_circle_pid(
     # episodes, and BPTT through the full 10 000 steps produces gradients
     # that overflow to NaN within a few Adam steps.  2 000 steps (~200 s)
     # is enough to evaluate tracking quality while keeping gradients stable.
-    n_steps = min(int(params.max_steps_in_episode), 2_000)
+    # 2000 steps (~200 s) is enough to evaluate tracking quality while keeping
+    # BPTT gradients stable. Overridable so the smoke test can build,
+    # differentiate and step this loss -- which is where its failures live --
+    # without paying for the full rollout: at the shipped size those three tests
+    # were 149 s of a 1017 CPU-second fast job.
+    n_steps = n_steps or min(int(params.max_steps_in_episode), 2_000)
     dt = float(params.delta_t)
 
     alt_lo, alt_hi = params.target_altitude_range
@@ -895,6 +907,7 @@ def tune_plane3d_figure8_pid(
     lr: float = 0.02,
     verbose: bool = True,
     n_targets: int = 6,
+    n_steps: int | None = None,
 ):
     """
     Tune figure-8 task PID: altitude PID (3) + heading P (1) + bank P (1) = 5 gains.
@@ -908,7 +921,12 @@ def tune_plane3d_figure8_pid(
 
     env = Plane3DFigureEight()
     params = env.default_params
-    n_steps = min(int(params.max_steps_in_episode), 2_000)
+    # 2000 steps (~200 s) is enough to evaluate tracking quality while keeping
+    # BPTT gradients stable. Overridable so the smoke test can build,
+    # differentiate and step this loss -- which is where its failures live --
+    # without paying for the full rollout: at the shipped size those three tests
+    # were 149 s of a 1017 CPU-second fast job.
+    n_steps = n_steps or min(int(params.max_steps_in_episode), 2_000)
     dt = float(params.delta_t)
 
     alt_lo, alt_hi = params.target_altitude_range

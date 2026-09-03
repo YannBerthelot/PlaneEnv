@@ -1,0 +1,344 @@
+{
+  "_meta": {
+    "generated": "2026-09-03T11:12:04+00:00",
+    "max_steps": 250,
+    "note": "Regenerate with scripts/record_baselines.py when a test reports a stale fingerprint. Commit the result with the change that invalidated it.",
+    "seeds": 5
+  },
+  "battery": {
+    "fingerprint": "abcaae4b547a3507",
+    "mpc_returns": [
+      242.779319,
+      104.129835,
+      108.753714,
+      107.506334,
+      110.903619
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      114.065202,
+      111.456941,
+      109.153339,
+      111.958543,
+      112.335937
+    ],
+    "seconds": 15.0,
+    "seeds": 5,
+    "steps": 250
+  },
+  "boiler_drum": {
+    "fingerprint": "35e6e25e4cd9bdaa",
+    "mpc_returns": [
+      212.870781,
+      174.814201,
+      179.604612,
+      175.464122,
+      175.148261
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      141.865024,
+      139.895897,
+      167.12337,
+      134.643189,
+      140.739551
+    ],
+    "seconds": 19.3,
+    "seeds": 5,
+    "steps": 250
+  },
+  "cement_kiln": {
+    "fingerprint": "5d9f25c08f7671c3",
+    "mpc_returns": [
+      217.471013,
+      216.891116,
+      213.56776,
+      218.673784,
+      214.800747
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      207.986004,
+      203.794788,
+      208.890677,
+      210.787877,
+      199.854063
+    ],
+    "seconds": 32.7,
+    "seeds": 5,
+    "steps": 240
+  },
+  "cstr": {
+    "fingerprint": "d7491d5a89fc7ed4",
+    "mpc_returns": [
+      98.262029,
+      94.659963,
+      92.019319,
+      94.064742,
+      94.083042
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      89.533492,
+      90.851778,
+      88.438006,
+      87.5389,
+      90.607347
+    ],
+    "seconds": 2.3,
+    "seeds": 5,
+    "steps": 100
+  },
+  "distillation": {
+    "fingerprint": "f512d33a1af32ef9",
+    "mpc_returns": [
+      115.651322,
+      173.635547,
+      176.294446,
+      164.638763,
+      120.618568
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      105.04083,
+      142.901092,
+      153.831855,
+      114.309475,
+      106.695994
+    ],
+    "seconds": 65.7,
+    "seeds": 5,
+    "steps": 200
+  },
+  "first_order": {
+    "fingerprint": "0457af8df9610e70",
+    "mpc_returns": [
+      91.32205,
+      95.72887,
+      97.571004,
+      96.118628,
+      94.478981
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      88.428098,
+      93.367374,
+      95.379603,
+      94.011747,
+      91.873807
+    ],
+    "seconds": 1.3,
+    "seeds": 5,
+    "steps": 100
+  },
+  "four_tank": {
+    "fingerprint": "6b91d132a3c402a3",
+    "mpc_returns": [
+      175.902291,
+      164.23676,
+      223.306184,
+      222.941001,
+      191.884512
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      149.083491,
+      158.042269,
+      179.932661,
+      174.114308,
+      160.175773
+    ],
+    "seconds": 10.2,
+    "seeds": 5,
+    "steps": 250
+  },
+  "glass_furnace": {
+    "fingerprint": "21dc2af852f1ee20",
+    "mpc_returns": [
+      134.847321,
+      147.58914,
+      143.31475,
+      159.835806,
+      175.877948
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      135.234367,
+      152.393856,
+      126.220872,
+      165.429533,
+      192.047011
+    ],
+    "seconds": 94.1,
+    "seeds": 5,
+    "steps": 240
+  },
+  "hvac": {
+    "fingerprint": "f0308f0c298f2a5f",
+    "mpc_returns": [
+      125.909217,
+      128.853457,
+      99.680575,
+      129.424993,
+      107.904318
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      112.48711,
+      119.99245,
+      94.880291,
+      121.430031,
+      100.197332
+    ],
+    "seconds": 13.3,
+    "seeds": 5,
+    "steps": 192
+  },
+  "ph_neutralization": {
+    "fingerprint": "5d8f7eaaf0e5d51e",
+    "mpc_returns": [
+      208.982009,
+      197.402872,
+      230.037944,
+      179.283473,
+      220.941508
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      196.331326,
+      179.321552,
+      199.012389,
+      169.419345,
+      195.311495
+    ],
+    "seconds": 9.0,
+    "seeds": 5,
+    "steps": 250
+  },
+  "plane": {
+    "fingerprint": "a7202e42bc9b924c",
+    "mpc_returns": [
+      41.808575,
+      181.70967,
+      154.227358,
+      180.234604,
+      181.164812
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      38.164101,
+      159.991011,
+      117.580473,
+      145.998938,
+      151.493432
+    ],
+    "seconds": 736.9,
+    "seeds": 5,
+    "steps": 200
+  },
+  "plane3d_circle": {
+    "fingerprint": "f59ab8da295b8e4d",
+    "mpc_returns": [
+      28.552461,
+      179.153508,
+      151.040306,
+      175.99159,
+      178.27042
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      18.167192,
+      63.625601,
+      39.879837,
+      55.559367,
+      57.173423
+    ],
+    "seconds": 345.0,
+    "seeds": 5,
+    "steps": 200
+  },
+  "plane3d_figure8": {
+    "fingerprint": "190abeb79bbe4933",
+    "mpc_returns": [
+      188.066322,
+      189.139918,
+      190.074444,
+      187.27295,
+      188.164767
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      31.380293,
+      40.620945,
+      41.264005,
+      37.713642,
+      39.820986
+    ],
+    "seconds": 347.7,
+    "seeds": 5,
+    "steps": 200
+  },
+  "plane3d_heading": {
+    "fingerprint": "17e575b087d5da72",
+    "mpc_returns": [
+      26.211547,
+      172.01735,
+      169.00908,
+      175.638921,
+      173.903255
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      7.013216,
+      25.911803,
+      12.606201,
+      58.428987,
+      30.570073
+    ],
+    "seconds": 346.0,
+    "seeds": 5,
+    "steps": 200
+  },
+  "reactor": {
+    "fingerprint": "12407819a7936a30",
+    "mpc_returns": [
+      31.090953,
+      31.214711,
+      31.037231,
+      31.014737,
+      30.320541
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      17.468119,
+      19.204541,
+      18.826785,
+      21.07427,
+      17.15233
+    ],
+    "seconds": 66.2,
+    "seeds": 5,
+    "steps": 250
+  },
+  "wind_turbine": {
+    "fingerprint": "d27bad2bf3692087",
+    "mpc_returns": [
+      214.563747,
+      218.967417,
+      214.25863,
+      218.373583,
+      212.622964
+    ],
+    "mpc_terminated_early": 0,
+    "pid_returns": [
+      218.872033,
+      197.196137,
+      202.521579,
+      213.425427,
+      200.867235
+    ],
+    "seconds": 53.0,
+    "seeds": 5,
+    "steps": 250
+  }
+}

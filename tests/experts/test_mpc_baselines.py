@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from target_gym.provenance import baseline_fingerprint, load_recorded_baselines
 from target_gym.registry import REGISTRY
 
 MPC_ENVS = [name for name, spec in REGISTRY.items() if spec.has_mpc]
@@ -157,56 +158,113 @@ def test_every_environment_without_an_mpc_says_why():
 # fails not because the MPC is broken but because the episode ends before the
 # controller's advantage exists.
 #
-# Cost: about nine minutes of the slow job's thirteen. It runs only there --
-# CI's matrix build uses -m "not slow" -- so the fast job is untouched.
+# Cost: this test is the slow job, and the four aircraft are most of it. Profiled
+# with --durations, [plane] alone took 836 s, against 415 / 376 / 344 for the
+# three 3D tasks and 94 or less for everything else. Because xdist parallelises
+# across tests, the *wall* time of the whole job cannot go below its single
+# longest test, so [plane] set roughly 70% of a 19:47 floor on a 14-core machine.
+# GitHub's runners have four slower cores and the job has a 30-minute timeout,
+# which that one test was close to spending on its own.
+#
+# The aircraft are expensive for a structural reason rather than a silly one:
+# their gradient MPC plans a horizon of 30 and then, for the 2D plane, holds the
+# last action for another 60 steps, so a single control step optimises a 90-step
+# rollout 50 times over -- 4500 simulated steps to choose one action.
+#
+# So the four aircraft run shorter episodes, and only they. The seed count is
+# deliberately *not* what gives: averaging over too few seeds is the exact trap
+# described above, and the termination assertion is per-seed, so cutting seeds
+# would weaken both halves of the contract. Episode length is the safe axis
+# here. A crashing aircraft crashes early -- driving one with full actuator
+# travel ends the episode at step 27 to 46 -- and the MPC's advantage over the
+# PID on these tasks is large and immediate rather than something that accrues
+# late. 120 steps keeps both signals and halves the bill.
+#
+# The floor is env-specific and has to stay that way: the four-tank needs ~198
+# steps for its tracking error to close, and capped at 100 it fails because the
+# episode ends before the controller's advantage exists, not because anything
+# is broken.
 
-QUALITY_SEEDS = 5
-CONTRACT_STEPS = 250
+# Seeds and episode length now live in scripts/record_baselines.py, which is
+# what actually rolls the plant out. Only the tolerance is asserted here.
 PID_SHORTFALL_TOLERANCE = 0.10
 
 
-@pytest.mark.slow
+@pytest.mark.parametrize("name", MPC_ENVS)
+def test_recorded_baseline_still_describes_this_tree(name):
+    """A recorded measurement must not be believed after the code moved.
+
+    This is the whole safety of recording rather than re-measuring. The record
+    carries a fingerprint of the environment's modules, the shared controller and
+    integration code, the tuned gains and the parameter values it was taken at;
+    if any of those moved, the numbers below describe code that no longer exists
+    and the right answer is to refuse them, not to average them.
+
+    Comments and docstrings are excluded from the fingerprint, so editing prose
+    does not send anyone off to spend forty minutes of CPU.
+    """
+    spec = REGISTRY[name]
+    if not spec.has_pid:
+        pytest.skip(f"{name}: {spec.baselines_note}")
+
+    recorded = load_recorded_baselines()
+    assert name in recorded, (
+        f"{name}: no recorded baseline. Run "
+        f"`uv run python scripts/record_baselines.py --envs {name}` and commit "
+        f"data/baseline_returns.json."
+    )
+    current = baseline_fingerprint(spec)
+    assert recorded[name]["fingerprint"] == current, (
+        f"{name}: the recorded baseline was taken against different code "
+        f"(recorded {recorded[name]['fingerprint']}, current {current}). Its "
+        f"physics, controllers, gains or parameters have changed since, so its "
+        f"numbers no longer say anything about this tree. Re-measure with "
+        f"`uv run python scripts/record_baselines.py --envs {name}` and commit "
+        f"the result with the change that invalidated it."
+    )
+
+
 @pytest.mark.parametrize("name", MPC_ENVS)
 def test_mpc_controls_at_least_as_well_as_the_pid(name):
     """The MPC is presented as an upper bound; hold it to that.
 
-    Two failures in one test, deliberately. They are distinct symptoms -- ending
-    the plant, and simply scoring less -- but the MPC rollout is the whole cost
-    of this file, and splitting them doubled the slow suite's runtime for no
-    extra coverage. A module-level cache would not fix it either: under xdist the
-    two tests for one environment can land on different workers.
+    Asserted from the recorded measurement rather than by reproducing it. The
+    rollouts cost about forty minutes of CPU, and one aircraft parametrisation
+    alone was 836 s of a 19:47 slow job -- which, since xdist parallelises across
+    tests and not within one, set roughly 70% of that job's wall-clock floor and
+    came close to its 30-minute timeout on CI's slower cores.
+
+    Reading the number instead of producing it makes this *stronger*, not
+    weaker. It now runs in the fast job on every push and across the whole
+    Python matrix, where before it ran once per merge to main on one
+    interpreter. What guards it is the fingerprint test above; what produces it
+    is scripts/record_baselines.py.
 
     Termination is checked first because it is the sharper signal. A controller
     that trips the turbine or flies the aircraft into the ground can still
     average acceptably across seeds, and averaging is exactly what hid it.
     """
-    from target_gym.runners.runners import mpc_policy, pid_policy, rollout
-
     spec = REGISTRY[name]
     if not spec.has_pid:
         pytest.skip(f"{name}: {spec.baselines_note}")
     if spec.mpc_degraded:
         pytest.xfail(f"{name}: {spec.mpc_degraded}")
 
-    horizon = min(int(spec.make_test_params().max_steps_in_episode), CONTRACT_STEPS)
-    params = spec.make_test_params(max_steps_in_episode=horizon)
-    env = spec.make_env()
-    pid, mpc = [], []
-    for seed in range(QUALITY_SEEDS):
-        _, _, r = rollout(spec, params, pid_policy(spec), seed)
-        pid.append(float(np.sum(r)))
-        _, _, r = rollout(spec, params, mpc_policy(spec, env, params), seed)
-        mpc.append(float(np.sum(r)))
-        assert len(r) >= horizon, (
-            f"{name}: MPC ended the episode at step {len(r)} of {horizon} on "
-            f"seed {seed} -- the plant reached a terminal state. Terminal "
-            f"conditions are reported through a boolean, so a reward penalty "
-            f"behind ``where(terminated, ...)`` gives the planner the cost of a "
-            f"crash but no gradient away from the boundary; a differentiable "
-            f"barrier on the approach is what works (see make_wind_turbine_mpc)."
-        )
+    recorded = load_recorded_baselines().get(name)
+    if recorded is None:
+        pytest.fail(f"{name}: no recorded baseline -- run scripts/record_baselines.py.")
 
-    pid, mpc = np.array(pid), np.array(mpc)
+    assert recorded["mpc_terminated_early"] == 0, (
+        f"{name}: the MPC ended {recorded['mpc_terminated_early']} of "
+        f"{recorded['seeds']} episodes early -- the plant reached a terminal "
+        f"state. Terminal conditions are reported through a boolean, so a reward "
+        f"penalty behind ``where(terminated, ...)`` gives the planner the cost of "
+        f"a crash but no gradient away from the boundary; a differentiable "
+        f"barrier on the approach is what works (see make_wind_turbine_mpc)."
+    )
+
+    pid = np.array(recorded["pid_returns"])
+    mpc = np.array(recorded["mpc_returns"])
     # Scale the allowance by the PID's own magnitude, so this reads the same way
     # for a return of 99 and one of 1100.
     allowance = PID_SHORTFALL_TOLERANCE * abs(pid.mean())

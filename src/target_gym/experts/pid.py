@@ -157,6 +157,29 @@ class MIMOPIDParams:
 # ---------------------------------------------------------------------------
 
 
+def pid_update(e, integral, prev_error, Kp, Ki, Kd, dt, action_min, action_max, xp):
+    """The PID recurrence itself, over whichever array module is passed.
+
+    This exists because it was written twice: once in ``pid_step`` for tracing
+    and once inside ``StatefulPID`` for the Python loop, with the anti-windup
+    spelled two different but equivalent ways. That is the duplication check 12
+    of the model review checklist is about, and the environments already avoid
+    it -- ``compute_reward(state, params, xp=jnp)`` is one function read by
+    ``numpy`` on the host and by ``jax`` under trace.
+
+    Anti-windup: on saturation the integral is left where it was, so a
+    controller pinned at its limit does not wind up a term it cannot spend.
+
+    Returns ``(u_clipped, new_integral, new_prev_error)``.
+    """
+    new_integral = integral + e * dt
+    derivative = (e - prev_error) / dt
+    u = Kp * e + Ki * new_integral + Kd * derivative
+    u_clipped = xp.clip(u, action_min, action_max)
+    new_integral = xp.where(u == u_clipped, new_integral, integral)
+    return u_clipped, new_integral, e
+
+
 def pid_reset(params: PIDParams) -> PIDState:  # noqa: ARG001
     """Return a zeroed initial state for a SISO PID."""
     return PIDState(integral=jnp.zeros(()), prev_error=jnp.zeros(()))
@@ -174,17 +197,19 @@ def pid_step(
     Anti-windup: the integral is not updated when the output is saturated.
     """
     e = obs[params.setpoint_index] - obs[params.state_index]
-
-    new_integral = state.integral + e * params.dt
-    derivative = (e - state.prev_error) / params.dt
-    u = params.Kp * e + params.Ki * new_integral + params.Kd * derivative
-    u_clipped = jnp.clip(u, params.action_min, params.action_max)
-
-    # Anti-windup: undo integral accumulation on saturation
-    new_integral = jnp.where(u == u_clipped, new_integral, state.integral)
-
-    new_state = PIDState(integral=new_integral, prev_error=e)
-    return jnp.array([u_clipped]), new_state
+    u_clipped, new_integral, new_prev = pid_update(
+        e,
+        state.integral,
+        state.prev_error,
+        params.Kp,
+        params.Ki,
+        params.Kd,
+        params.dt,
+        params.action_min,
+        params.action_max,
+        jnp,
+    )
+    return jnp.array([u_clipped]), PIDState(integral=new_integral, prev_error=new_prev)
 
 
 def gain_scheduled_pid_step(
@@ -369,7 +394,7 @@ def plane3d_heading_pid_step(
     target_heading = obs[11]
     phi = obs[6]
     phi_dot = obs[7]  # roll rate
-    hdg_err = _wrap_angle_jnp(target_heading - psi)
+    hdg_err = _wrap_angle(target_heading - psi)
     new_hdg_int = state.track_integral + hdg_err * params.dt
     hdg_d = (hdg_err - state.track_prev) / params.dt
     desired_bank = jnp.clip(
@@ -494,7 +519,7 @@ def plane3d_figure8_pid_step(
     correction_heading = jnp.arctan2(nearest_dy, nearest_dx)
     bx = blend * jnp.cos(correction_heading) + (1.0 - blend) * jnp.cos(tangent_heading)
     by = blend * jnp.sin(correction_heading) + (1.0 - blend) * jnp.sin(tangent_heading)
-    hdg_err = _wrap_angle_jnp(jnp.arctan2(by, bx) - psi)
+    hdg_err = _wrap_angle(jnp.arctan2(by, bx) - psi)
     new_hdg_int = state.track_integral + hdg_err * params.dt
     hdg_d = (hdg_err - state.track_prev) / params.dt
     desired_bank = jnp.clip(
@@ -561,6 +586,14 @@ class PatrolPIDParams:
 
 _PATROL_NOMINAL_SPEED = 230.0  # m/s, the follower's cruise
 
+# Standard gravity, for the coordinated-turn relation tan(phi) = v^2 / (g R).
+# The circle and patrol lateral laws already take this as a constructor
+# argument; the patrol turn-rate conversion below spelled it three times as a
+# literal. Named here so the coupling to the plant's own ``gravity`` parameter
+# is at least visible: a plant configured with a different one would disagree
+# with every controller that hardcodes this.
+_G = 9.81
+
 
 def patrol_pid_step(
     params: PatrolPIDParams,
@@ -614,10 +647,10 @@ def patrol_pid_step(
     rgt = jnp.array([jnp.sin(psi_lead), -jnp.cos(psi_lead)])
     v = e_back * fwd - e_right * rgt
     dist_h = jnp.sqrt(e_back**2 + e_right**2 + 1e-6)
-    pursuit_err = _wrap_angle_jnp(jnp.arctan2(v[1], v[0]) - psi)
+    pursuit_err = _wrap_angle(jnp.arctan2(v[1], v[0]) - psi)
     parallel_err = rel_heading  # wrap(psi_lead - psi)
     blend = jnp.clip(dist_h / params.blend_dist, 0.0, 1.0)
-    heading_err = _wrap_angle_jnp(blend * pursuit_err + (1.0 - blend) * parallel_err)
+    heading_err = _wrap_angle(blend * pursuit_err + (1.0 - blend) * parallel_err)
 
     new_hdg_int = state.track_integral + heading_err * params.dt
     hdg_d = (heading_err - state.track_prev) / params.dt
@@ -647,10 +680,10 @@ def patrol_pid_step(
         + params.Ki_hdg * new_hdg_int
         + params.Kd_hdg * hdg_d
     )
-    turn_rate_cmd = 9.81 * bank_cmd / _PATROL_NOMINAL_SPEED
-    turn_rate_max = 9.81 * jnp.tan(params.max_bank_rad) / speed
+    turn_rate_cmd = _G * bank_cmd / _PATROL_NOMINAL_SPEED
+    turn_rate_max = _G * jnp.tan(params.max_bank_rad) / speed
     turn_rate_cmd = jnp.clip(turn_rate_cmd, -turn_rate_max, turn_rate_max)
-    desired_bank = jnp.arctan(speed * turn_rate_cmd / 9.81)
+    desired_bank = jnp.arctan(speed * turn_rate_cmd / _G)
     bank_err = phi - desired_bank
     aileron = jnp.clip(params.Kp_bank * bank_err - params.Kd_bank * phi_dot, -1.0, 1.0)
     new_hdg_int = jnp.where(jnp.abs(aileron) >= 1.0, state.track_integral, new_hdg_int)
@@ -861,15 +894,18 @@ class StatefulPID:
             if self.fixed_setpoint is not None
             else obs[..., self.setpoint_index]
         )
-        e = sp - state_val
-        self.integral = self.integral + e * self.dt
-        derivative = (e - self.prev_error) / self.dt
-        u = self.Kp * e + self.Ki * self.integral + self.Kd * derivative
-        u_clipped = np.clip(u, self.action_min, self.action_max)
-        self.integral = np.where(
-            u != u_clipped, self.integral - e * self.dt, self.integral
+        u_clipped, self.integral, self.prev_error = pid_update(
+            sp - state_val,
+            self.integral,
+            self.prev_error,
+            self.Kp,
+            self.Ki,
+            self.Kd,
+            self.dt,
+            self.action_min,
+            self.action_max,
+            np,
         )
-        self.prev_error = e
         return u_clipped
 
     __call__ = step
@@ -1751,8 +1787,22 @@ def make_plane_stateful_gs_pid() -> StatefulMIMOPID:
 # oscillation period.
 
 
-def _wrap_angle_jnp(a):
-    return jnp.arctan2(jnp.sin(a), jnp.cos(a))
+def _wrap_angle(a, xp=jnp):
+    """Wrap an angle to (-pi, pi], over whichever array module is passed.
+
+    This was written twice, and the two were not the same function. The traced
+    form used ``arctan2(sin, cos)`` and the host form ``(a + pi) % (2 pi) - pi``,
+    which agree everywhere except at exactly ``a = pi``, where the first returns
+    ``+pi`` and the second ``-pi``. That is a heading error of half a turn
+    resolving to opposite signs in the two implementations -- one controller
+    turning left where the other turns right -- in a file that keeps a traced
+    and a host copy of the same control laws. See check 12 in
+    docs/model-review-checklist.md.
+
+    ``arctan2(sin, cos)`` is kept because it is the numerically better of the
+    two near the wrap, and it works unchanged under numpy.
+    """
+    return xp.arctan2(xp.sin(a), xp.cos(a))
 
 
 # ── obs index conventions (see plane3d/env.py) ────────────────────────────
@@ -1816,7 +1866,7 @@ class StatefulPlane3DHeadingPID:
         target_heading = obs[..., 11]
         phi = obs[..., 6]
 
-        hdg_err = _wrap_angle_jnp(target_heading - psi)
+        hdg_err = _wrap_angle_np(target_heading - psi)
         self._hdg_int = self._hdg_int + hdg_err * self.dt
         deriv = (hdg_err - self._hdg_prev) / self.dt
         desired_bank = (
@@ -2007,7 +2057,7 @@ class StatefulPlane3DFigureEightPID:
         )
         desired_heading = np.arctan2(by, bx)
 
-        hdg_err = _wrap_angle_jnp(desired_heading - psi)
+        hdg_err = _wrap_angle_np(desired_heading - psi)
         self._hdg_int = self._hdg_int + hdg_err * self.dt
         hdg_d = (hdg_err - self._hdg_prev) / self.dt
         desired_bank = np.clip(
@@ -2449,7 +2499,7 @@ class _HeadingLateral:
         self._prev = 0.0
 
     def __call__(self, obs, phi, phi_dot):
-        err = _wrap_angle_jnp(obs[..., 11] - obs[..., 9])
+        err = _wrap_angle_np(obs[..., 11] - obs[..., 9])
         self._int = self._int + err * self.dt
         deriv = (err - self._prev) / self.dt
         self._prev = err
@@ -2567,8 +2617,8 @@ def make_plane3d_circle_cascaded_pid() -> StatefulCascadedPlane3DPID:
 
 
 def _wrap_angle_np(a):
-    """Wrap an angle to (-pi, pi] using numpy, for the stateful controllers."""
-    return (a + np.pi) % (2 * np.pi) - np.pi
+    """Wrap an angle to (-pi, pi] on the host. Thin alias, kept for callers."""
+    return _wrap_angle(a, np)
 
 
 class StatefulPatrolPID:

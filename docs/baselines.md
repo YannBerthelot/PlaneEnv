@@ -211,6 +211,67 @@ built and emitted finite, in-bounds actions -- which is exactly what a
 controller that has given up does, so an MPC returning -0.02 against a PID's 393
 passed for as long as it was there.
 
+### The measurement is recorded, not reproduced
+
+Rolling every shipped controller out to check that claim costs about forty
+minutes of CPU, and it was being paid on every merge. Profiled with
+`--durations`, one parametrisation -- `[plane]` -- took **836 s** of a 19:47 job,
+against 415 / 376 / 344 for the three 3D tasks and 94 or less for everything
+else. That is structural rather than careless: the 2D aircraft's MPC plans a
+horizon of 30 and then holds its last action for another 60 steps, so choosing a
+single action optimises a 90-step rollout fifty times over -- 4500 simulated
+steps per control step.
+
+It also could not be parallelised away. `pytest-xdist` distributes across tests
+and not within one, so the job's wall clock can never fall below its longest
+single test: `[plane]` alone set roughly 70% of the floor, and on GitHub's four
+slower cores it approached the job's own 30-minute timeout.
+
+But the answer only moves when the physics, the controllers or their gains move,
+and most merges touch none of them. So the rollouts are run by hand and the
+result committed:
+
+```bash
+make baselines              # everything, ~40 min
+make baselines-plane        # or one environment
+```
+
+`scripts/record_baselines.py` writes `data/baseline_returns.json`, and the
+contract is asserted from that. Reading a number rather than producing it makes
+the check *stronger*: it now runs in the fast job on every push and across the
+whole Python matrix, where before it ran once per merge to main on a single
+interpreter.
+
+**What it bought.** The slow job went from 19:47 to **42 s**, and the contract
+moved into the fast job where it now runs on every push and on every interpreter
+in the matrix.
+
+**What stops a stale record from passing.** Each entry carries a fingerprint of
+everything that determines it -- the environment's own modules, the shared
+controller and integration code, that environment's tuned gains, and the
+parameter values the measurement was taken at. A test compares it against the
+tree and refuses a record that no longer describes the code, naming the command
+that regenerates it.
+
+The fingerprint is taken over *source*, not over behaviour, and that is
+deliberate. Hashing a short trajectory would be more direct and does not survive
+the matrix: those numbers are float32 results of `exp`, `sin` and `tanh`, whose
+last bits are not guaranteed identical between the arm64 machine a maintainer
+regenerates on and the x86 runner that checks. A fingerprint that disagreed with
+itself across platforms would fail every run and teach people to regenerate on
+red rather than on change. Source hashing fails the other way, which is the safe
+one: it can report staleness that is not real -- a rename invalidates a record
+the behaviour would have kept -- but never freshness that is not real. One costs
+a command; the other costs CI certifying a claim about code that no longer
+exists.
+
+Comments and docstrings are excluded, because this repository edits prose
+constantly and none of it moves a number. `ast.dump` is deliberately not used to
+build the digest: its fields gained members between Python versions, so the same
+file would fingerprint differently across the 3.11-3.14 matrix.
+
+### What the tolerance means
+
 The bar is deliberately loose (10% of the PID's return, five seeds, episodes
 capped at 250 steps). It is a tripwire against gross regression, not
 the published comparison: the numbers below were measured over ten seeds, and

@@ -8,7 +8,8 @@ CPU_ENV := CUDA_VISIBLE_DEVICES="" JAX_PLATFORMS=cpu JAX_PLATFORM_NAME=cpu
 
 .PHONY: ci ci-lint ci-format-check ci-test help install \
         all all-% figures figures-% videos videos-% tuning tuning-% \
-        clear-tuning clear-mpc short-gifs test test-all mypy coverage \
+        clear-tuning clear-mpc short-gifs baselines baselines-% \
+        test test-all mypy coverage \
         missing-annotations type lint format check-codestyle commit-checks \
         mypy-all
 
@@ -67,6 +68,12 @@ clear-tuning:
 
 short-gifs:
 	uv run python scripts/shorten_gifs.py
+
+baselines:  ## Re-measure the recorded MPC-vs-PID baselines (slow, by hand)
+	uv run python scripts/record_baselines.py
+
+baselines-%:  ## Re-measure one environment's recorded baseline
+	uv run python scripts/record_baselines.py --envs $*
 
 clear-mpc:
 	rm -rf data/mpc_cache data/interpolators

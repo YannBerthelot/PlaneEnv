@@ -19,6 +19,22 @@ import target_gym.experts.pid_tuning as tuning
 
 SMOKE_STEPS = 2
 
+# What this test is for is that each tuner builds a loss, differentiates it and
+# applies an update -- that is where their failures live, and it is what the two
+# gradient steps above buy. It is not for the quality of the result, which no
+# two-step search could show.
+#
+# The three 3D-aircraft tuners default to a 2000-step BPTT rollout over 36 or 64
+# target pairs and four seeds, and compiling and differentiating that cost 149 s
+# of a 1017 CPU-second fast job -- the largest single cluster in it. Shrinking
+# the problem exercises exactly the same lines for a fraction of the work, so
+# the coverage this test carries is unchanged.
+SMOKE_TUNER_KWARGS = {
+    "tune_plane3d_heading_pid": {"n_targets": 2, "n_steps": 100},
+    "tune_plane3d_circle_pid": {"n_targets": 2, "n_steps": 100},
+    "tune_plane3d_figure8_pid": {"n_targets": 2, "n_steps": 100},
+}
+
 # Three aircraft tuners return NaN gains. The mechanism is the one that was
 # found and fixed for the four-tank -- an operation whose forward value is fine
 # but whose reverse-mode derivative is NaN, which then poisons every gain -- but
@@ -82,7 +98,8 @@ def _flatten(gains) -> list[float]:
     ],
 )
 def test_tuner_returns_usable_gains(name):
-    gains = getattr(tuning, name)(n_grad_steps=SMOKE_STEPS, verbose=False)
+    kwargs = SMOKE_TUNER_KWARGS.get(name, {})
+    gains = getattr(tuning, name)(n_grad_steps=SMOKE_STEPS, verbose=False, **kwargs)
     values = _flatten(gains)
 
     assert values, f"{name} returned no gains"

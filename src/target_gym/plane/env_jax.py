@@ -15,7 +15,11 @@ from target_gym.plane.env import (
     compute_reward,
     get_obs,
 )
-from target_gym.plane.rendering import _render
+
+# The console renderer, on the shared instrument kit the plants use. The older
+# pygame scene is kept in rendering.py: it is far faster per frame, so it stays
+# available for anyone rendering long episodes interactively.
+from target_gym.plane.rendering_console import _render
 from target_gym.utils import compute_norm_from_coordinates, save_video
 
 

@@ -21,50 +21,111 @@ from target_gym import render_kit as rk
 
 HISTORY_KEYS = ("t", "altitude", "target", "speed", "pitch", "power", "reward")
 
-# Side elevation of an airliner, in units of its own length, nose at +x. A side
-# view shows one wing edge-on and a vertical fin -- mirroring the wing about the
-# fuselage, as a first attempt did, draws a plan view and reads as a cross.
-_FUSELAGE = np.array(
-    [
-        (0.52, 0.010),
-        (0.44, 0.045),
-        (0.10, 0.060),
-        (-0.30, 0.055),
-        (-0.46, 0.030),
-        (-0.52, 0.004),
-        (-0.46, -0.020),
-        (-0.20, -0.045),
-        (0.20, -0.048),
-        (0.44, -0.030),
-    ]
-)
-_WING = np.array([(0.10, -0.02), (-0.16, -0.20), (-0.26, -0.20), (-0.06, -0.02)])
-_FIN = np.array([(-0.30, 0.05), (-0.40, 0.24), (-0.50, 0.24), (-0.46, 0.04)])
-_HSTAB = np.array([(-0.42, 0.02), (-0.56, 0.10), (-0.62, 0.09), (-0.50, 0.01)])
-_WINDOWS = np.linspace(-0.24, 0.30, 11)
+# How much recent flight the scene panel shows behind the aircraft.
+_TRAIL_SAMPLES = 80
 
 
+# Faint cloud layers, drifting with the distance actually flown. The settled
+# scene is otherwise motionless -- the aircraft is pinned mid-panel holding a
+# constant altitude -- so nothing in it says the aircraft is moving at 230 m/s.
+# Three depths at different parallax rates give that back for the cost of a few
+# ellipses. The alphas are deliberately near-invisible: a first attempt at
+# 0.16 filled the panel with grey blobs that competed with the aircraft,
+# which is the opposite of the point.
+_CLOUD_LAYERS = ((0.045, 0.10, 2600.0), (0.030, 0.15, 5600.0), (0.020, 0.22, 9800.0))
+_CLOUD_RNG = np.random.default_rng(7)
+_CLOUD_SEEDS = [
+    _CLOUD_RNG.uniform(0.0, 1.0, size=(4, 3)) for _ in range(len(_CLOUD_LAYERS))
+]
+
+
+# The aircraft is the A320 mesh that plane3d already flies -- fourteen faces in
+# body frame, x forward, y right, z up -- rather than a second hand-drawn
+# silhouette. One model means the 2D and 3D environments show the same aircraft,
+# and the geometry is the sourced one from PHYSICS.md (37.57 m long) instead of
+# a shape that merely looked about right.
 def _rotate(points: np.ndarray, angle: float) -> np.ndarray:
     c, s = np.cos(angle), np.sin(angle)
     return points @ np.array([[c, -s], [s, c]])
 
 
+def _draw_clouds(ax, x_flown: float):
+    """Parallax cloud layers, positioned by how far the aircraft has flown."""
+    from matplotlib.patches import Ellipse
+
+    for (alpha, scale, wavelength), seeds in zip(_CLOUD_LAYERS, _CLOUD_SEEDS):
+        for u, v, w in seeds:
+            # Wrap the layer so clouds re-enter from the right as they leave.
+            x = ((u - x_flown / wavelength) % 1.15) - 0.075
+            y = 0.24 + 0.62 * v
+            for k, (dx, dy, sx) in enumerate(
+                ((0.0, 0.0, 1.0), (0.55, 0.10, 0.72), (-0.5, 0.06, 0.66))
+            ):
+                ax.add_patch(
+                    Ellipse(
+                        (x + dx * scale, y + dy * scale),
+                        width=scale * (1.5 + 0.5 * w) * sx,
+                        height=scale * (0.55 + 0.2 * w) * sx,
+                        facecolor=rk.TEXT,
+                        edgecolor="none",
+                        alpha=alpha,
+                        zorder=1 + k * 0,
+                    )
+                )
+
+
+def _mesh_side_view():
+    """The shared A320 mesh, ready to project onto a side elevation."""
+    from target_gym.plane3d.rendering import _build_plane_faces
+
+    faces, length, _, _, _ = _build_plane_faces()
+    return faces, float(length)
+
+
+def _face_color(rgb) -> str:
+    """Map the mesh's greyscale shading onto the console palette.
+
+    The mesh carries plain greys (160-245) that encode which way a face points.
+    Keeping that shading but re-tinting it is what makes the aircraft belong to
+    the same drawing as the gauges beside it.
+    """
+    lum = float(np.mean(rgb)) / 255.0
+    return rk.lerp_hex(rk.FRAME, "#eef4fc", float(np.clip((lum - 0.55) / 0.42, 0, 1)))
+
+
 def _draw_aircraft(ax, x, y, theta, scale, color, shade):
-    origin = np.array([x, y])
-    for shape, fc, z in (
-        (_WING, shade, 5),
-        (_HSTAB, shade, 5),
-        (_FIN, shade, 7),
-        (_FUSELAGE, color, 6),
-    ):
-        pts = _rotate(shape * scale, theta) + origin
-        ax.fill(pts[:, 0], pts[:, 1], color=fc, ec=rk.FRAME, lw=0.7, zorder=z)
-    # Cabin windows: a row of dots is what makes a shape read as an airliner
-    # rather than a dart, and it costs one scatter call.
-    win = _rotate(
-        np.column_stack([_WINDOWS, np.full_like(_WINDOWS, 0.012)]) * scale, theta
+    """Project the mesh in side elevation, pitched by ``theta``.
+
+    Orthographic, camera looking along -y, so screen x is body x and screen y is
+    body z. Faces are drawn back to front by their mean y, which is all the
+    depth ordering a side view needs.
+    """
+    faces, length = _mesh_side_view()
+    c, s_ = np.cos(theta), np.sin(theta)
+    rot = np.array([[c, -s_], [s_, c]])
+    unit = scale / length
+
+    for verts, rgb, name in sorted(faces, key=lambda f: float(np.mean(f[0][:, 1]))):
+        xy = np.column_stack([verts[:, 0], verts[:, 2]]) * unit
+        xy = xy @ rot.T + np.array([x, y])
+        ax.fill(
+            xy[:, 0],
+            xy[:, 1],
+            facecolor=_face_color(rgb),
+            edgecolor=rk.FRAME,
+            lw=0.5,
+            zorder=6,
+            joinstyle="round",
+        )
+
+    # Cabin windows along the fuselage side.
+    win = (
+        np.column_stack(
+            [np.linspace(-0.34, 0.30, 13) * scale, np.full(13, 0.012 * scale)]
+        )
+        @ rot.T
     )
-    ax.scatter(win[:, 0] + x, win[:, 1] + y, s=1.6, color=rk.BG, zorder=8, linewidths=0)
+    ax.scatter(win[:, 0] + x, win[:, 1] + y, s=1.4, color=rk.BG, zorder=8, linewidths=0)
 
 
 def _draw_scene(ax, state, params, history):
@@ -78,6 +139,8 @@ def _draw_scene(ax, state, params, history):
 
     def to_y(a: float) -> float:
         return 0.06 + 0.88 * float(np.clip((a - lo) / span, 0.0, 1.0))
+
+    _draw_clouds(ax, float(state.x))
 
     # Ground, and the altitude envelope the episode ends outside of.
     ax.axhspan(0.0, to_y(lo), color=rk.PANEL, zorder=0)
@@ -102,12 +165,22 @@ def _draw_scene(ax, state, params, history):
         ha="right",
     )
 
-    # Where it has been: the trail is the tracking record, which is the point.
-    if len(history["altitude"]) > 1:
-        n = len(history["altitude"])
-        xs = np.linspace(max(0.62 - 0.018 * n, 0.06), 0.62, n)
-        ys = [to_y(a) for a in history["altitude"]]
-        ax.plot(xs, ys, color=rk.CYAN, lw=1.1, alpha=0.55, zorder=4)
+    # Where it has just been. A recent window, not the whole flight: over a
+    # 10 000-step episode the history holds a thousand samples, and drawing all
+    # of them compressed the climb into a vertical spike detached from the
+    # aircraft. The strip chart underneath is what shows the whole episode.
+    trail = history["altitude"][-_TRAIL_SAMPLES:]
+    if len(trail) > 1:
+        xs = np.linspace(0.62 - 0.34 * (len(trail) / _TRAIL_SAMPLES), 0.62, len(trail))
+        ax.plot(
+            xs,
+            [to_y(a) for a in trail],
+            color=rk.CYAN,
+            lw=1.2,
+            alpha=0.6,
+            zorder=4,
+            solid_capstyle="round",
+        )
 
     x_ac = 0.62
     y_ac = to_y(alt)

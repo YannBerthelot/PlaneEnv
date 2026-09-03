@@ -14,9 +14,8 @@
 </p>
 
 <p align="center">
-  <img src="videos/plane3d/figure8_short.gif" width="270px"/>
-  <img src="videos/glass_furnace/pid_output_short.gif" width="270px"/>
-  <img src="videos/boiler_drum/pid_output_short.gif" width="270px"/>
+  <img src="videos/gallery_mosaic.webp" width="100%"/><br/>
+  <sub>Six of the eighteen, each held on setpoint by its shipped PID baseline.</sub>
 </p>
 
 ```bash
@@ -72,22 +71,7 @@ Every environment ships a PID baseline and sixteen of eighteen also ship an
 MPC, so a learned policy has something real to beat -- and where a baseline is
 weak, the docs say how weak.
 
-### Where this fits
-
-| | what it gives you | what it does not |
-|---|---|---|
-| [gymnax](https://github.com/RobertTLange/gymnax) | classic RL tasks in JAX, very fast | no industrial plants, no expert baselines |
-| [brax](https://github.com/google/brax) | rigid-body robotics in JAX | locomotion, not setpoint regulation |
-| [pc-gym](https://github.com/MaximilianB2/pc-gym) | process-control environments | fewer plants, no physics contracts, less baseline coverage |
-| **TargetGym** | **18 plants, tuned PID + MPC on almost all, sourced and tested physics** | not a robotics suite; CPU-first |
-
-Use TargetGym if you want to know whether a learned policy beats classical
-control on a plant whose physics somebody actually checked. If you want fast
-classic benchmarks or locomotion, the first two are better tools.
-
----
-
-## Environments
+### Environments
 
 Throughput is measured with `python -m target_gym.benchmark_speed`: 256 environments
 under `vmap`, stepped 800 deep inside one `jit`-compiled `scan`, on CPU -- the way an

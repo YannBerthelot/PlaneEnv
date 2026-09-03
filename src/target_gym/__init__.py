@@ -1,4 +1,5 @@
-from importlib.metadata import PackageNotFoundError, version
+from importlib.metadata import PackageNotFoundError as _PackageNotFoundError
+from importlib.metadata import version as _version
 
 from target_gym.boiler_drum.env import BoilerDrumParams
 from target_gym.boiler_drum.env_jax import BoilerDrum
@@ -23,24 +24,32 @@ from target_gym.pc_gym.four_tank.env_jax import FourTank, FourTankParams
 from target_gym.pc_gym.ph_neutralization.env import PHParams
 from target_gym.pc_gym.ph_neutralization.env_jax import PHNeutralization
 from target_gym.plane.env import PlaneParams
-from target_gym.plane.env_jax import Airplane2D as Plane
+from target_gym.plane.env_jax import Airplane2D
 from target_gym.plane3d.env import PlaneParams3D
 from target_gym.plane3d.env_jax import Plane3DCircle, Plane3DFigureEight, Plane3DHeading
-from target_gym.plane3d.env_jax import Plane3DHeading as Plane3D
 from target_gym.reactor.env import ReactorParams
 from target_gym.reactor.env_jax import Reactor
 from target_gym.wrapper import gym_wrapper_factory
 
 try:
-    __version__ = version("target-gym")
-except PackageNotFoundError:
+    __version__ = _version("target-gym")
+except _PackageNotFoundError:
     __version__ = "0.0.0"  # fallback for dev environments
+
+# Friendly aliases. The class's own ``__name__`` is exported too, because
+# ``type(env).__name__`` is the first thing anyone reads off an object and it
+# has to be importable -- this package's own README got that wrong, reaching for
+# ``Airplane2D`` because that is what the object calls itself.
+Plane = Airplane2D
+Plane3D = Plane3DHeading
 
 GymnasiumPlane = gym_wrapper_factory(Plane)
 
 
 __all__ = (
+    "gym_wrapper_factory",
     "Plane",
+    "Airplane2D",  # the class's own name; Plane is the friendly alias
     "PlaneParams",
     "Plane3D",
     "Plane3DHeading",

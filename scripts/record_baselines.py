@@ -43,14 +43,21 @@ from target_gym.provenance import BASELINES_PATH, baseline_fingerprint
 from target_gym.registry import REGISTRY
 from target_gym.runners.runners import mpc_policy, pid_policy, rollout
 
-# Five seeds, because two mislead. During the work these baselines came from, an
-# MPC scored 277 on seed 0 and 65 on seed 1 -- an average of the two looks
-# healthy where the ten-seed truth was -61. Episodes are capped to bound the
-# cost; the floor is set by the four-tank, whose tracking error takes ~198 steps
-# to close, so a 100-step cap would fail it for having no advantage yet rather
-# than for being broken.
-SEEDS = 5
-MAX_STEPS = 250
+# Ten seeds, because two mislead and five is a tripwire rather than a
+# measurement. During the work these baselines came from, an MPC scored 277 on
+# seed 0 and 65 on seed 1 -- an average of the two looks healthy where the
+# ten-seed truth was -61.
+#
+# Ten rather than five because this file is now the *only* place these numbers
+# are measured. docs/baselines.md used to publish a separate ten-seed table
+# alongside a five-seed contract, which is two measurements of one quantity and
+# a guarantee they eventually disagree. The published table is generated from
+# this artifact instead, so the contract and the claim cannot drift apart.
+#
+# Episodes come from each environment's own EnvSpec.test_params, which since the
+# episode-length audit satisfy N >= max(10 * tau_actuator, 3 * T_period) -- long
+# enough that holding the target, not reaching it, is what is being scored.
+SEEDS = 10
 
 
 def record(name: str) -> dict | None:
@@ -58,8 +65,8 @@ def record(name: str) -> dict | None:
     if not spec.has_pid or spec.make_mpc is None:
         return None
 
-    horizon = min(int(spec.make_test_params().max_steps_in_episode), MAX_STEPS)
-    params = spec.make_test_params(max_steps_in_episode=horizon)
+    params = spec.make_test_params()
+    horizon = int(params.max_steps_in_episode)
     env = spec.make_env()
 
     pid, mpc, terminated_early = [], [], 0
@@ -112,7 +119,6 @@ def main() -> int:
     out["_meta"] = {
         "generated": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "seeds": SEEDS,
-        "max_steps": MAX_STEPS,
         "note": (
             "Regenerate with scripts/record_baselines.py when a test reports a "
             "stale fingerprint. Commit the result with the change that "

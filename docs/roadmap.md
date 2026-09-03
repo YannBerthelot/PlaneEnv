@@ -124,6 +124,24 @@ what is broken and recorded rather than hidden.
       [docs/reward-shaping.md](docs/reward-shaping.md).
 * [ ] **Move off the Alpha classifier** once the others above are settled.
 
+### Documentation debt
+
+* [ ] **Action labels for eight environments.** The generated environment pages
+      read action meanings out of each environment's own class docstring, from
+      lines like `Action (2): [fuel, feedwater], raw in [-1, 1]`. Ten of the
+      eighteen have one; the other eight show bounds with a blank meaning,
+      because inventing labels in the generator would put words in the
+      environment's mouth on a reference page. The fix is at the source: add the
+      line to the eight docstrings, and the pages pick it up on the next
+      regeneration.
+
+* [ ] **Wire the page generators into the test suite.** `docs/environments.md`
+      already has a sync test. `scripts/generate_env_pages.py --check` and
+      `scripts/generate_env_reference.py --check` should both run in CI so a
+      parameter change cannot leave eighteen environment pages quietly
+      disagreeing with the code. The check costs seconds; the failure mode it
+      prevents is documentation that lies.
+
 ### Known gaps
 
 The test suite records these rather than hiding them -- five `strict` xfail

@@ -143,16 +143,16 @@ before reading any result from it.
 | --- | --- | --- | --- | --- |
 | cstr | 100 | 5 | 25 | 0.99000 |
 | first_order | 100 | 10 | 50 | 0.99000 |
-| hvac | 192 | 62 | **310** | 0.99479 |
-| plane | 200 | 23 | 115 | 0.99500 |
+| hvac | 720 | 62 | 310 | 0.99861 |
+| plane | 280 | 23 | 115 | 0.99643 |
 | plane3d_heading | 200 | 14 | 70 | 0.99500 |
-| plane3d_circle | 200 | 14 | 70 | 0.99500 |
-| plane3d_figure8 | 200 | 38 | 190 | 0.99500 |
+| plane3d_circle | 800 | 14 | 70 | 0.99875 |
+| plane3d_figure8 | 800 | 38 | 190 | 0.99875 |
 | patrol | 200 | 13 | 65 | 0.99500 |
 | patrol_bearing_only | 200 | 12 | 60 | 0.99500 |
 | distillation | 200 | 8 | 40 | 0.99500 |
-| glass_furnace | 240 | 132 | **660** | 0.99583 |
-| cement_kiln | 240 | 58 | **290** | 0.99583 |
+| glass_furnace | 1600 | 132 | 660 | 0.99938 |
+| cement_kiln | 700 | 58 | 290 | 0.99857 |
 | battery | 360 | 1 | 5 | 0.99722 |
 | boiler_drum | 400 | 3 | 15 | 0.99750 |
 | wind_turbine | 400 | 1 | 5 | 0.99750 |
@@ -160,14 +160,66 @@ before reading any result from it.
 | ph_neutralization | 300 | 14 | 70 | 0.99667 |
 | reactor | 1200 | 1 | 5 | 0.99917 |
 
-**Three environments are evaluated over less than a full settling.** The glass
-furnace would need 2.8x its episode for five open-loop time constants, HVAC
-1.6x, the cement kiln 1.2x. On those, no controller -- classical or learned --
-can demonstrate steady-state holding, and every score there is partly a measure
-of the approach rather than of maintenance. That is a real limitation of the
-suite and is recorded rather than corrected here: lengthening those episodes
-would invalidate every baseline number in the repository, so it is a deliberate
-decision to take separately.
+### How long an episode has to be
+
+Two time scales bind, and an episode has to clear both.
+
+**Settling.** A first-order system reaches 98% of a step in 4 tau and 99.3% in
+5 tau. This library is about reaching a target *and holding it*, so for holding
+to be what the score measures rather than the approach, the episode needs room
+for both: **a floor of 10 tau** -- roughly five to arrive and five to hold, so
+maintenance is at least half of what is scored -- and a target nearer **15 tau**.
+
+That is not an invented figure. Excluding four plants whose output answers the
+actuator within a step or two, where the ratio is meaningless, the suite's
+median was already **13.7 tau** with a cluster from 8.7 to 25. The floor names
+the norm the environments mostly already followed.
+
+**Period.** For a path-following or otherwise periodic task the binding scale is
+the task's own period, not the actuator's response, and the requirement is
+**three periods**. One lap proves nothing about holding a path, and the model
+review checklist records why: these tasks start the aircraft exactly on the
+path, so a controller that flies straight ahead looks correct for a whole
+episode that is shorter than one lap.
+
+    N >= max(10 * tau_actuator, 3 * T_period)
+
+**Six benchmark episodes were below that and have been lengthened.** The
+environments themselves were fine -- their own defaults are long -- but
+`EnvSpec.test_params` overrode them with much shorter ones, a compromise from
+when this measurement ran inside CI. It no longer does, so the compromise is no
+longer needed.
+
+| environment | was | now | binding criterion |
+| --- | --- | --- | --- |
+| glass_furnace | 240 (1.8 tau) | 1600 | 12.1 tau |
+| hvac | 192 (3.1 tau) | 720 | 11.6 tau |
+| cement_kiln | 240 (4.1 tau) | 700 | 12.1 tau |
+| plane | 200 (8.7 tau) | 280 | 12.2 tau |
+| plane3d_circle | 200 (**0.76 laps**) | 800 | 3.0 laps |
+| plane3d_figure8 | 200 (**0.91 laps**) | 800 | 3.6 laps |
+
+The circle is the instructive one: at 14.3 tau it passed the settling test
+comfortably and was still being scored over three-quarters of a single lap. A
+single criterion would have missed it.
+
+### A second, separate shortfall: slow dynamics that never move
+
+Settling is about whether a controller can demonstrate holding. A different
+question is whether the *slow* dynamics a task advertises actually happen inside
+its episode, and for one environment they do not.
+
+Over a full reactor episode the xenon state moves **2.5%** and iodine 1.6%. Xenon
+poisoning is the reactor's headline difficulty, and at this episode length it is
+effectively a constant bias rather than something to anticipate. Its actuator
+response is one step, so no settling criterion catches this.
+
+Fixing it means an episode on the order of a xenon time constant -- 17 hours
+against the current 20 minutes, some fifty times longer -- which is a different
+and much larger decision than lengthening the six above, with consequences for
+what the task is. It is recorded here and left open rather than folded into this
+change. Until then, results on the reactor should be read as measuring flux
+tracking, not xenon management.
 
 ## 7. Hyperparameters, and why they must be tuned
 

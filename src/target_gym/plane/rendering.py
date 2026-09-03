@@ -4,6 +4,36 @@ import numpy as np
 import pygame
 from pygame import gfxdraw
 
+# ── Palette ───────────────────────────────────────────────────────────────
+# Borrowed from ``target_gym.render_kit``, which the industrial plants already
+# render with. The aircraft used a sky-blue background over pure #00FF00
+# ground, which is a different visual language entirely -- beside a furnace or
+# a drum boiler in the same gallery it read as a different project. Same hues,
+# same dark console ground, so eighteen environments look like one library.
+#
+# Kept as RGB tuples because pygame wants tuples and render_kit stores hex for
+# matplotlib; the values are the same colours.
+_SKY = (
+    22,
+    34,
+    48,
+)  # lifted off render_kit BG so the aircraft has a field to read against
+_SKY_HIGH = (30, 44, 60)  # HUD panel fill
+_GROUND = (26, 52, 58)  # muted teal, was pure (0, 255, 0)
+_HORIZON = (30, 50, 72)  # render_kit FRAME   #1e3248
+_INK = (196, 216, 236)  # render_kit TEXT    #c4d8ec
+_DIM = (74, 102, 120)  # render_kit DIM     #4a6678
+_HULL = (236, 244, 252)  # aircraft body -- the brightest thing in frame, deliberately
+_HULL_SHADE = (158, 182, 206)  # wings and stabilisers
+_OUTLINE = (30, 50, 72)
+_ACCENT = (0, 188, 212)  # render_kit CYAN    #00bcd4
+_TARGET = (255, 202, 40)  # render_kit AMBER   #ffca28
+_STAR = (196, 216, 236)
+# Clouds were pure white, which against a near-black sky reads as a hole in the
+# image rather than as weather. Dim slate, a little above the panel fill.
+_CLOUD = (32, 46, 62)
+_CLOUD_EDGE = (32, 46, 62)
+
 
 def draw_dashed_line(surface, color, start_pos, end_pos, dash_length=5, space_length=5):
     x1, y1 = start_pos
@@ -24,8 +54,8 @@ def draw_cloud(
     center_y,
     scale=1.0,
     seed=42,
-    color=(255, 255, 255),
-    outline_color=(0, 0, 0),
+    color=_CLOUD,
+    outline_color=_CLOUD_EDGE,
     outline_thickness=3,
 ):
     rnd = np.random.default_rng(seed)
@@ -75,12 +105,12 @@ def render_plane_scene(
 
     # Create surface
     surf = pygame.Surface((screen_width, screen_height))
-    surf.fill((135, 206, 235))  # Sky blue
+    surf.fill(_SKY)
 
     # Ground
     ground_y = int(screen_height - (0 + ground_buffer) * scale_y)
     pygame.draw.rect(
-        surf, (0, 255, 0), (0, ground_y, screen_width, screen_height - ground_y)
+        surf, _GROUND, (0, ground_y, screen_width, screen_height - ground_y)
     )
 
     # Plane position
@@ -205,20 +235,20 @@ def render_plane_scene(
         draw_cloud(surf, cx, cy, scale=scale, seed=shape)
 
     # Draw plane parts
-    gfxdraw.filled_polygon(surf, plane_body, (255, 255, 255))
-    gfxdraw.aapolygon(surf, plane_body, (0, 0, 0))
+    gfxdraw.filled_polygon(surf, plane_body, _HULL)
+    gfxdraw.aapolygon(surf, plane_body, _OUTLINE)
 
-    gfxdraw.filled_polygon(surf, wing, (180, 180, 180))
-    gfxdraw.aapolygon(surf, wing, (0, 0, 0))
+    gfxdraw.filled_polygon(surf, wing, _HULL_SHADE)
+    gfxdraw.aapolygon(surf, wing, _OUTLINE)
 
-    gfxdraw.filled_polygon(surf, stabilizer, (255, 255, 255))
-    gfxdraw.aapolygon(surf, stabilizer, (0, 0, 0))
+    gfxdraw.filled_polygon(surf, stabilizer, _HULL)
+    gfxdraw.aapolygon(surf, stabilizer, _OUTLINE)
 
-    gfxdraw.filled_polygon(surf, hstab, (180, 180, 180))
-    gfxdraw.aapolygon(surf, hstab, (0, 0, 0))
+    gfxdraw.filled_polygon(surf, hstab, _HULL_SHADE)
+    gfxdraw.aapolygon(surf, hstab, _OUTLINE)
 
-    gfxdraw.filled_polygon(surf, engine, (180, 180, 180))
-    gfxdraw.aapolygon(surf, engine, (0, 0, 0))
+    gfxdraw.filled_polygon(surf, engine, _HULL_SHADE)
+    gfxdraw.aapolygon(surf, engine, _OUTLINE)
 
     # Draw passenger windows
     for wx, wy in passenger_windows_points:
@@ -243,12 +273,12 @@ def render_plane_scene(
 
     # Draw ground line and trail
     ground_y = int(screen_height - ground_buffer * scale_y)
-    gfxdraw.hline(surf, 0, screen_width, ground_y, (0, 0, 0))
+    gfxdraw.hline(surf, 0, screen_width, ground_y, _HORIZON)
 
     # Draw trail
     for x, y in positions_history[0::20]:
-        gfxdraw.circle(surf, x, y, 2, (0, 0, 0))
-        gfxdraw.circle(surf, x, y, 1, (255, 255, 255))
+        gfxdraw.circle(surf, x, y, 2, _DIM)
+        gfxdraw.circle(surf, x, y, 1, _STAR)
 
     # Draw HUD
     padding = 8
@@ -257,30 +287,26 @@ def render_plane_scene(
 
     # Prepare text surfaces
     text_target = font.render(
-        f"Target Alt: {int(state.target_altitude * 3.281)} ft", True, (255, 0, 0)
+        f"Target Alt: {int(state.target_altitude * 3.281)} ft", True, _TARGET
     )
     text_altitude = font.render(
-        f"Altitude: {int(state.z * 3.281)} ft - {int(state.z)} m", True, (0, 0, 255)
+        f"Altitude: {int(state.z * 3.281)} ft - {int(state.z)} m", True, _INK
     )
     text_distance = font.render(
         f"Distance:  {int(state.x*0.539957/1000)} nm - {int(state.x/1000)} km",
         True,
-        (0, 0, 255),
+        _INK,
     )
     text_velocity = font.render(
         f"Speed: {int(state.x_dot * 1.944)} kt - {int(state.x_dot * 3.6)} km/h",
         True,
-        (0, 0, 255),
+        _INK,
     )
-    text_pitch = font.render(
-        f"Pitch: {np.rad2deg(state.theta):.1f}°", True, (0, 0, 255)
-    )
-    text_power = font.render(f"Power: {state.power*100:.0f}%", True, (0, 0, 255))
-    text_stick = font.render(
-        f"Stick: {np.rad2deg(state.stick):.0f}°", True, (0, 0, 255)
-    )
+    text_pitch = font.render(f"Pitch: {np.rad2deg(state.theta):.1f}°", True, _INK)
+    text_power = font.render(f"Power: {state.power*100:.0f}%", True, _INK)
+    text_stick = font.render(f"Stick: {np.rad2deg(state.stick):.0f}°", True, _INK)
     time_elapsed = time.strftime("%H:%M:%S", time.gmtime(state.time))
-    text_time = font.render(f"Time: {time_elapsed}", True, (0, 0, 255))
+    text_time = font.render(f"Time: {time_elapsed}", True, _INK)
     # reward = 1 if abs(state.z - state.target_altitude) < 1_000 else 0
     max_alt_diff = params.max_alt - params.min_alt
     done1 = state.time >= params.max_steps_in_episode
@@ -290,7 +316,7 @@ def render_plane_scene(
         reward = (
             (max_alt_diff - abs(state.target_altitude - state.z)) / max_alt_diff
         ) ** 2
-    text_reward = font.render(f"Reward: {reward:.2f}", True, (0, 0, 255))
+    text_reward = font.render(f"Reward: {reward:.2f}", True, _INK)
 
     # Organize columns
     left_column = [text_altitude, text_distance, text_velocity]
@@ -323,9 +349,9 @@ def render_plane_scene(
     hud_rect = pygame.Rect(hud_x, hud_y, hud_width, hud_height)
 
     outline_thickness = 3
-    pygame.draw.rect(surf, (0, 0, 0), hud_rect, border_radius=6)
+    pygame.draw.rect(surf, _SKY, hud_rect, border_radius=6)
     inner_rect = hud_rect.inflate(-2 * outline_thickness, -2 * outline_thickness)
-    pygame.draw.rect(surf, (255, 255, 255), inner_rect, border_radius=6)
+    pygame.draw.rect(surf, _SKY_HIGH, inner_rect, border_radius=6)
 
     # Draw text
     col_x = hud_x + padding

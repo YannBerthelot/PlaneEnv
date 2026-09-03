@@ -23,6 +23,22 @@ from target_gym.plane.rendering import draw_dashed_line
 # ─────────────────────────────────────────────────────────
 
 
+# ── Palette ───────────────────────────────────────────────────────────────
+# Shared with target_gym.render_kit, which the industrial plants render with,
+# and with plane/rendering.py. The 3D tasks drew a sky-blue field over bright
+# green terrain; beside a furnace or a reactor in the same gallery that read as
+# a different project rather than a different environment.
+_SKY = (22, 34, 48)  # lifted off render_kit BG so the aircraft reads against it
+_PANEL = (30, 44, 60)  # HUD panel fill
+_GROUND = (26, 52, 58)  # muted teal
+_FRAME = (30, 50, 72)  # render_kit FRAME  #1e3248
+_INK = (196, 216, 236)  # render_kit TEXT   #c4d8ec
+_DIM = (74, 102, 120)  # render_kit DIM    #4a6678
+_ACCENT = (0, 188, 212)  # render_kit CYAN   #00bcd4
+_TARGET = (255, 202, 40)  # render_kit AMBER  #ffca28
+_GOOD = (102, 187, 106)  # render_kit GREEN  #66bb6a
+
+
 def _rotate_point(x, y, angle):
     """Rotate (x, y) by *angle* radians (positive = CCW)."""
     c, s = np.cos(angle), np.sin(angle)
@@ -50,9 +66,9 @@ def _draw_hud_box(surf, columns, screen_width, padding=8, line_height=22, hud_y=
     hud_x = (screen_width - hud_w) // 2
 
     rect = pygame.Rect(hud_x, hud_y, hud_w, hud_h)
-    pygame.draw.rect(surf, (0, 0, 0), rect, border_radius=6)
+    pygame.draw.rect(surf, _FRAME, rect, border_radius=6)
     inner = rect.inflate(-6, -6)
-    pygame.draw.rect(surf, (255, 255, 255), inner, border_radius=6)
+    pygame.draw.rect(surf, _PANEL, inner, border_radius=6)
 
     col_x = hud_x + padding
     for ci, col in enumerate(columns):
@@ -294,7 +310,7 @@ def _build_plane_faces():
         ),  # red, left wing tip
         (
             np.array([-wc_tip * 0.3 * 0.5, ws - 0.2, -fh * 0.3]),
-            (50, 255, 50),
+            _GOOD,
             "nav_stbd",
         ),  # green, right wing tip
         (
@@ -497,7 +513,7 @@ def render_side_scene(
 ):
     """Side view (x-z), centered on the aircraft, with adaptive scale."""
     surf = pygame.Surface((panel_w, panel_h))
-    surf.fill((135, 206, 235))  # sky blue
+    surf.fill(_SKY)
 
     cx, cy = panel_w // 2, panel_h // 2
     cur_x, cur_z = float(state.x), float(state.z)
@@ -622,8 +638,8 @@ def render_side_scene(
         for wx, wz in pts:
             sx, sy = world_to_screen(wx, wz)
             if 0 <= sx < panel_w and 0 <= sy < panel_h:
-                gfxdraw.circle(surf, sx, sy, 2, (0, 0, 0))
-                gfxdraw.circle(surf, sx, sy, 1, (255, 255, 255))
+                gfxdraw.circle(surf, sx, sy, 2, _FRAME)
+                gfxdraw.circle(surf, sx, sy, 1, _INK)
 
     # HUD
     font = pygame.font.SysFont("arial", 16)
@@ -642,27 +658,27 @@ def render_side_scene(
         font.render(
             f"Altitude: {int(state.z * 3.281):,} ft - {int(state.z):,} m",
             True,
-            (0, 0, 255),
+            _INK,
         ),
         font.render(
             f"Distance: {int(state.x * 0.539957 / 1000)} nm - {int(state.x / 1000)} km",
             True,
-            (0, 0, 255),
+            _INK,
         ),
         font.render(
             f"Speed: {int(ground_speed * 1.944)} kt - {int(ground_speed * 3.6)} km/h",
             True,
-            (0, 0, 255),
+            _INK,
         ),
     ]
     mid = [
-        font.render(f"Pitch: {np.rad2deg(state.theta):.1f}\u00b0", True, (0, 0, 255)),
-        font.render(f"Bank: {np.rad2deg(state.phi):.1f}\u00b0", True, (0, 0, 255)),
-        font.render(f"Power: {state.power * 100:.0f}%", True, (0, 0, 255)),
+        font.render(f"Pitch: {np.rad2deg(state.theta):.1f}\u00b0", True, _INK),
+        font.render(f"Bank: {np.rad2deg(state.phi):.1f}\u00b0", True, _INK),
+        font.render(f"Power: {state.power * 100:.0f}%", True, _INK),
     ]
     right = [
-        font.render(f"Time: {time_elapsed}", True, (0, 0, 255)),
-        font.render(f"Reward: {reward:.2f}", True, (0, 0, 255)),
+        font.render(f"Time: {time_elapsed}", True, _INK),
+        font.render(f"Reward: {reward:.2f}", True, _INK),
     ]
     _draw_hud_box(surf, [left, mid, right], panel_w)
 
@@ -687,7 +703,7 @@ def render_topdown_scene(
     """Top-down view (x-y) with task-specific overlay."""
     surf = pygame.Surface((panel_w, panel_h))
     # Ground color for top-down view (looking down at terrain)
-    surf.fill((120, 170, 90))
+    surf.fill(_GROUND)  # top-down terrain; was (120, 170, 90) grass green
 
     cx, cy = panel_w // 2, panel_h // 2
 
@@ -723,7 +739,7 @@ def render_topdown_scene(
             sx, sy = world_to_screen(wx, wy)
             if 0 <= sx < panel_w and 0 <= sy < panel_h:
                 gfxdraw.circle(surf, sx, sy, 2, (60, 60, 60))
-                gfxdraw.circle(surf, sx, sy, 1, (255, 255, 255))
+                gfxdraw.circle(surf, sx, sy, 1, _INK)
 
     # -- task-specific overlay --
     if task_type == "heading":
@@ -839,7 +855,7 @@ def render_topdown_scene(
     if task_type == "heading":
         target_deg = np.rad2deg(state.target_heading) % 360
         left = [
-            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, (0, 0, 255)),
+            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, _INK),
             font.render(f"Target: {target_deg:.0f}\u00b0", True, (200, 30, 30)),
         ]
     elif task_type == "circle":
@@ -847,7 +863,7 @@ def render_topdown_scene(
 
         d = float(distance_to_circle(state))
         left = [
-            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, (0, 0, 255)),
+            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, _INK),
             font.render(f"Dist to circle: {int(d)} m", True, (200, 30, 30)),
         ]
     elif task_type == "figure8":
@@ -855,19 +871,17 @@ def render_topdown_scene(
 
         _, _, _, d, _ = nearest_point_on_twisted_lemniscate(state, params)
         left = [
-            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, (0, 0, 255)),
+            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, _INK),
             font.render(f"Dist to curve: {int(d)} m", True, (200, 30, 30)),
         ]
     else:
         left = [
-            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, (0, 0, 255)),
+            font.render(f"Heading: {heading_deg:.0f}\u00b0", True, _INK),
         ]
 
     right = [
-        font.render(f"Bank: {np.rad2deg(state.phi):.1f}\u00b0", True, (0, 0, 255)),
-        font.render(
-            f"Aileron: {np.rad2deg(state.aileron):.0f}\u00b0", True, (0, 0, 255)
-        ),
+        font.render(f"Bank: {np.rad2deg(state.phi):.1f}\u00b0", True, _INK),
+        font.render(f"Aileron: {np.rad2deg(state.aileron):.0f}\u00b0", True, _INK),
     ]
     _draw_hud_box(surf, [left, right], panel_w)
 
@@ -959,7 +973,7 @@ def _render(cls, screen, state, params, frames, clock):
     )
 
     # Thin divider between panels
-    pygame.draw.line(top_surf, (0, 0, 0), (0, 0), (0, panel_h), 2)
+    pygame.draw.line(top_surf, _FRAME, (0, 0), (0, panel_h), 2)
 
     # Compose
     combined = pygame.Surface((total_w, panel_h))

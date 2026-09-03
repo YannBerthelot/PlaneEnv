@@ -350,7 +350,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.plane.env", "PlaneParams"),
         make_pid=_pid("make_plane_cascaded_pid"),
         make_mpc=_mpc("make_plane_mpc"),
-        test_params={"max_steps_in_episode": 200},
+        test_params={"max_steps_in_episode": 280},
         tuned_gains_key="plane",
         disturbance_fields=("gust_x", "gust_z"),
         disturbance_overrides={"turbulence_sigma": 3.0},
@@ -374,7 +374,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.plane3d.env", "PlaneParams3D"),
         make_pid=_pid("make_plane3d_circle_cascaded_pid"),
         make_mpc=_mpc("make_plane3d_mpc"),
-        test_params={"max_steps_in_episode": 200},
+        test_params={"max_steps_in_episode": 800},
         tuned_gains_key="plane3d_circle",
         disturbance_fields=("gust_x", "gust_y", "gust_z"),
         disturbance_overrides={"turbulence_sigma": 3.0},
@@ -386,7 +386,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.plane3d.env", "PlaneParams3D"),
         make_pid=_pid("make_plane3d_figure8_stateful_pid"),
         make_mpc=_mpc("make_plane3d_mpc"),
-        test_params={"max_steps_in_episode": 200},
+        test_params={"max_steps_in_episode": 800},
         tuned_gains_key="plane3d_figure8",
         disturbance_fields=("gust_x", "gust_y", "gust_z"),
         disturbance_overrides={"turbulence_sigma": 3.0},
@@ -504,9 +504,33 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.glass_furnace.env", "GlassFurnaceParams"),
         make_pid=_pid("make_glass_furnace_stateful_pid"),
         make_mpc=_mpc("make_glass_furnace_mpc"),
-        test_params={"max_steps_in_episode": 240},  # 2 h at dt=30 s
+        test_params={"max_steps_in_episode": 1600},  # 13.3 h at dt=30 s, 12.1 tau
         tuned_gains_key="glass_furnace",
         disturbance_fields=("m_pull_disturbance",),
+        mpc_degraded=(
+            "16.0% behind the PID over ten seeds (1028.5 against 1223.9), "
+            "losing on 10 of 10, so it is not the upper bound the benchmark "
+            "presents it as. This was hidden until the benchmark episode was "
+            "lengthened from 240 steps to 1600: at 240 the two scored within "
+            "1.3% of each other because the episode ended while both were still "
+            "on their way to the setpoint. Split into deciles the two are "
+            "*identical* for the first half of the episode, and from the sixth "
+            "the PID converges to 0.0-0.5 K of crown-temperature error while the "
+            "MPC plateaus at 2-6 K. That is a steady-state offset, and its "
+            "origin is structural: _extract_x0 collapses the plant's two "
+            "four-node regenerator chambers onto the model's three nodes by "
+            "averaging, so the planner optimises against a reduced model and a "
+            "finite-horizon MPC with plant-model mismatch settles with a bias "
+            "that a PID's integrator does not. An offset-free correction (a "
+            "clamped integral of the measured error shifting the solver's "
+            "setpoint, dropped at each schedule step because it also absorbs "
+            "operating-point-specific gain error) recovers part of it: 19.1% "
+            "behind became 16.0%. Horizon is not the cause -- taking it from "
+            "0.45 to 1.52 open-loop time constants is worth 1.1 points at three "
+            "times the solve cost. Closing the rest means either a regenerator "
+            "model that matches the plant's node count or a proper disturbance "
+            "observer, which is a larger piece of work than this note."
+        ),
     ),
     EnvSpec(
         name="reactor",
@@ -532,7 +556,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_mpc=_mpc("make_hvac_mpc"),
         # 2 days at dt=900 s. Long enough to cover two setback recoveries and
         # two solar cycles, which is what distinguishes controllers here.
-        test_params={"max_steps_in_episode": 192},
+        test_params={"max_steps_in_episode": 720},
         tuned_gains_key="hvac",
         disturbance_fields=("weather_dev",),
     ),
@@ -546,7 +570,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         # 240 steps = 2 hours at dt = 30 s, about five transport delays -- long
         # enough that a controller has to live with the consequences of its
         # own earlier fuel changes.
-        test_params={"max_steps_in_episode": 240},
+        test_params={"max_steps_in_episode": 700},
         tuned_gains_key="cement_kiln",
         disturbance_fields=("raw_meal",),
     ),

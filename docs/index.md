@@ -1,53 +1,57 @@
-# TargetGym documentation
+---
+hide:
+  - toc
+---
 
-JAX reinforcement learning environments for **target MDPs** -- tasks where the
-objective is to reach and hold a subset of the state space against
-disturbances, not to reach a goal and stop. Holding a setpoint, forever, is
-what industrial control actually is.
+# TargetGym
 
-### Start here
+<p align="center">
+  <b>Reach a setpoint. Hold it forever. Against disturbances.</b><br/>
+  Eighteen JAX environments for <i>target MDPs</i> — the control problems industry actually has.
+</p>
 
-| | |
-|---|---|
-| **[Getting started](getting-started.md)** | Install, run an episode, plug into Gymnasium or a JAX training loop |
-| **[Environment reference](environments.md)** | All eighteen: shapes, tracked variables, baselines, physics contracts |
-| **[Public API](api.md)** | What is stable, what is not, and what changes at 1.0 |
+<p align="center">
+  <img src="videos/gallery_mosaic.webp" width="100%"/><br/>
+  <sub>Six of the eighteen, each held on setpoint by its shipped PID baseline.</sub>
+</p>
 
-### Beating the baselines
+---
 
-| | |
-|---|---|
-| **[Baselines](baselines.md)** | The shipped PID and MPC controllers, how they score, and where they are weak |
-| **[RL protocol](rl-protocol.md)** | The measurement rules for learned policies, fixed before any number existed |
-| **[RL results](rl-baselines.md)** | Where learned-policy numbers go, and what stops a stale one being quoted |
+```bash
+pip install target-gym
+```
 
-### Why you can trust the numbers
+```python
+import jax
+import numpy as np
+from target_gym import Plane, PlaneParams
+from target_gym.registry import REGISTRY
 
-| | |
-|---|---|
-| **[Physics methodology](PHYSICS_METHODOLOGY.md)** | How each environment's physics is sourced, validated and bounded |
-| **[Model review checklist](model-review-checklist.md)** | Thirteen checks derived from real defects, with what each one finds across the eighteen |
-| **[Reward shaping](reward-shaping.md)** | Why the tracking rewards have the shape they do, with the measurements |
-| **[Testing](testing.md)** | What runs in CI, what is recorded by hand, and why |
+env, params = Plane(), PlaneParams()
+obs, state = env.reset_env(jax.random.PRNGKey(0), params)
 
-### Contributing
+# Every environment ships a tuned expert, so a learned policy
+# has something real to beat.
+pid = REGISTRY["plane"].make_pid()
+pid.reset()
 
-| | |
-|---|---|
-| **[Contributing](../CONTRIBUTING.md)** | Tests, style, and what adding an environment involves |
-| **[Roadmap and known gaps](roadmap.md)** | What is done, what is next, and what is broken and recorded |
-| **[Functional structure](functional-structure.md)** | What is already monadic here, and what JAX will not support |
+for t in range(200):
+    action = np.atleast_1d(pid(obs))
+    obs, state, reward, terminated, truncated = env.step_env(
+        jax.random.PRNGKey(t), state, action, params
+    )
+```
 
-## What makes these environments different
+[Browse the eighteen environments →](environments.md){ .md-button .md-button--primary }
+[Getting started →](getting-started.md){ .md-button }
 
-Every environment's physics is a **documented, tested contract** rather than a
-claim. Each carries a `PHYSICS.md` beside its module giving a sourced parameter
-table, published validation targets that the test suite asserts, and quantified
-known deviations from the literature. A deviation that cannot be fixed today is
-recorded and pinned with a strict xfail, so fixing it later fails loudly
-instead of passing unnoticed.
+---
 
-They also target the failure modes that make real control hard:
+## Why these environments
+
+Reaching a goal and stopping is not what industrial control is. Holding a
+setpoint against disturbances, forever, is — and that changes which failure
+modes matter:
 
 | | |
 |---|---|
@@ -58,6 +62,37 @@ They also target the failure modes that make real control hard:
 | **Multi-timescale** | Millisecond neutronics against hour-long xenon; sub-second flame gas against 30 h glass residence |
 | **Finite budgets** | A battery whose tracking *now* costs the ability to track later |
 
-Every environment ships a PID baseline and most also ship an MPC, so a learned
-policy has something real to beat -- and where a baseline is missing, the
-registry records why.
+Every environment ships a tuned PID, and sixteen of eighteen also ship an MPC,
+so a learned policy has something real to beat — and **where a baseline is weak,
+the docs say how weak**.
+
+## Documentation
+
+<div class="grid cards" markdown>
+
+- **Use it**
+
+    [Getting started](getting-started.md) ·
+    [Environments](environments.md) ·
+    [API reference](api.md)
+
+- **Beat the baselines**
+
+    [Baselines](baselines.md) ·
+    [RL protocol](rl-protocol.md) ·
+    [RL results](rl-baselines.md)
+
+- **Trust the numbers**
+
+    [Physics methodology](PHYSICS_METHODOLOGY.md) ·
+    [Model review checklist](model-review-checklist.md) ·
+    [Reward shaping](reward-shaping.md) ·
+    [Testing](testing.md)
+
+- **Contribute**
+
+    [Contributing](../CONTRIBUTING.md) ·
+    [Roadmap and known gaps](roadmap.md) ·
+    [Functional structure](functional-structure.md)
+
+</div>

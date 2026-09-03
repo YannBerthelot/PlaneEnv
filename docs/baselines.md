@@ -244,7 +244,18 @@ interpreter.
 
 **What it bought.** The slow job went from 19:47 to **42 s**, and the contract
 moved into the fast job where it now runs on every push and on every interpreter
-in the matrix.
+in the matrix. It also removed the reason the measurement had been compromised:
+episodes had been capped at 250 steps and seeds at five to fit a CI budget, and
+neither cap is needed once the rollouts happen by hand. Both were lifted, which
+is what exposed the glass furnace's MPC (see below).
+
+**What it costs.** The fingerprint covers the shared controller modules, so
+editing `experts/mpc.py` invalidates all sixteen records even when the change
+provably touches one environment. That is deliberate. A finer, symbol-level
+fingerprint would have to resolve `_pid("make_glass_furnace_stateful_pid")` --
+a string lookup -- and a miss there produces a record that is stale and *looks*
+fresh, which is the one direction this design refuses. The price is a
+re-measurement after controller work; the alternative price is a false green.
 
 **What stops a stale record from passing.** Each entry carries a fingerprint of
 everything that determines it -- the environment's own modules, the shared
@@ -287,6 +298,40 @@ conclusion about the contract's *resolution*, which the reward change does not
 alter. Two aircraft are recorded as `EnvSpec.mpc_degraded` and
 xfail with their measured reasons, so a known gap is explicit rather than
 absent.
+
+## What a longer episode exposed
+
+Lengthening the benchmark episodes to satisfy
+`N >= max(10 * tau_actuator, 3 * T_period)` -- see the episode-length section of
+[the RL protocol](rl-protocol.md) -- immediately found a defect that the short
+ones had been hiding, which is the argument for having done it.
+
+The **glass furnace MPC is 16.0% behind its PID over ten seeds and loses on 10
+of 10.** At the previous 240-step episode the two scored within 1.3% and the
+contract passed. Split into deciles they are *identical* over the first half of
+a 1600-step episode -- both still on their way to the setpoint, which is all the
+old episode ever measured -- and from the sixth the PID converges to 0.0-0.5 K
+of crown-temperature error while the MPC plateaus at 2-6 K.
+
+That is a steady-state offset with a structural cause. `_extract_x0` collapses
+the plant's two four-node regenerator chambers onto the model's three nodes by
+averaging, so the planner optimises against a reduced model, and a
+finite-horizon MPC with plant-model mismatch settles with a bias that a PID's
+integrator removes. An offset-free correction -- a clamped integral of the
+measured error shifting the solver's setpoint, dropped at each schedule step
+because it also absorbs operating-point-specific gain error -- takes it from
+19.1% behind to 16.0%, and is kept. Horizon is not the cause: going from 0.45 to
+1.52 open-loop time constants is worth 1.1 points at three times the solve cost.
+
+The remainder needs either a regenerator model matching the plant's node count
+or a proper disturbance observer. Until then it is recorded as
+`EnvSpec.mpc_degraded` with those numbers, so the contract xfails on it rather
+than the benchmark quietly presenting a controller as an upper bound it is not.
+
+The same change moved the two path-following tasks from being scored over **less
+than one lap** -- 0.76 for the circle, 0.91 for the figure-8 -- to three. Their
+MPC leads over the PID went to +48.7% and +347.5% per step, because holding a
+path is what those tasks are for and a sub-lap episode never asked for it.
 
 ## MPC against PID, ten seeds
 

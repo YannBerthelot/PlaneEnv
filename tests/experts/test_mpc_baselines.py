@@ -147,43 +147,34 @@ def test_every_environment_without_an_mpc_says_why():
 # PID is within 4% once fixed. 10% separates those two populations with room on
 # both sides.
 #
-# Five seeds, not two or three. Two seeds hides the battery entirely -- its MPC
+# Ten seeds, not two or three. Two seeds hides the battery entirely -- its MPC
 # scored 277 on seed 0 and 65 on seed 1, so the average of the two looks healthy
 # while the ten-seed truth is -61. That is the same trap that produced three
 # wrong conclusions in the work this file came from, and it applies to the
 # tripwire, not only to the ranking.
 #
-# Episodes are capped at 250 steps to bound the cost. The floor is set by the
-# four-tank, whose tracking error takes ~198 steps to close: capped at 100 it
-# fails not because the MPC is broken but because the episode ends before the
-# controller's advantage exists.
+# Episodes are each environment's own, from EnvSpec.test_params, and are no
+# longer capped. The cap was 250 steps and existed to bound CI cost back when
+# this test rolled the plants out itself; it truncated the reactor from 1200
+# steps, the four-tank from 500 and the boiler drum from 400, which measures
+# something other than the episode the environment defines. Since the
+# episode-length audit those episodes satisfy
+# N >= max(10 * tau_actuator, 3 * T_period) -- long enough that holding the
+# target, rather than reaching it, is what gets scored.
 #
-# Cost: this test is the slow job, and the four aircraft are most of it. Profiled
-# with --durations, [plane] alone took 836 s, against 415 / 376 / 344 for the
-# three 3D tasks and 94 or less for everything else. Because xdist parallelises
-# across tests, the *wall* time of the whole job cannot go below its single
-# longest test, so [plane] set roughly 70% of a 19:47 floor on a 14-core machine.
-# GitHub's runners have four slower cores and the job has a 30-minute timeout,
-# which that one test was close to spending on its own.
+# None of that is paid here any more. This file used to be the slow job:
+# profiled with --durations, [plane] alone took 836 s of a 19:47 run, and since
+# xdist parallelises across tests rather than within one, that single test set
+# roughly 70% of the wall-clock floor and came close to the job's 30-minute
+# timeout on CI's four slower cores. The aircraft are expensive structurally --
+# their gradient MPC plans 30 steps and, for the 2D plane, holds the last action
+# for 60 more, so choosing one action optimises a 90-step rollout fifty times
+# over.
 #
-# The aircraft are expensive for a structural reason rather than a silly one:
-# their gradient MPC plans a horizon of 30 and then, for the 2D plane, holds the
-# last action for another 60 steps, so a single control step optimises a 90-step
-# rollout 50 times over -- 4500 simulated steps to choose one action.
-#
-# So the four aircraft run shorter episodes, and only they. The seed count is
-# deliberately *not* what gives: averaging over too few seeds is the exact trap
-# described above, and the termination assertion is per-seed, so cutting seeds
-# would weaken both halves of the contract. Episode length is the safe axis
-# here. A crashing aircraft crashes early -- driving one with full actuator
-# travel ends the episode at step 27 to 46 -- and the MPC's advantage over the
-# PID on these tasks is large and immediate rather than something that accrues
-# late. 120 steps keeps both signals and halves the bill.
-#
-# The floor is env-specific and has to stay that way: the four-tank needs ~198
-# steps for its tracking error to close, and capped at 100 it fails because the
-# episode ends before the controller's advantage exists, not because anything
-# is broken.
+# The measurement now happens in scripts/record_baselines.py, by hand, and this
+# file reads what it wrote. That also made it affordable to stop compromising on
+# episode length and seed count at the same time, which is why both moved up
+# rather than down.
 
 # Seeds and episode length now live in scripts/record_baselines.py, which is
 # what actually rolls the plant out. Only the tolerance is asserted here.

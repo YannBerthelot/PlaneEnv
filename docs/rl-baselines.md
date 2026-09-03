@@ -41,6 +41,11 @@ stored verbatim and is deliberately *not* fingerprinted: two runs of the same
 agent at different hyperparameters are different results, not stale ones, and
 both are worth keeping. `tag` separates them.
 
+The experimental design -- which agents, which hyperparameters, how many seeds,
+what the expert-based arm actually is -- is fixed in advance in
+[the measurement protocol](rl-protocol.md). It is written to be one a reader who
+wanted the opposite conclusion would accept.
+
 ## Running the training
 
 Training happens outside this package. The dependency runs one way -- from the RL

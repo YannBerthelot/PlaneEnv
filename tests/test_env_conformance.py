@@ -826,6 +826,9 @@ ACCELERATION_LIMIT = 8.0
 # is. Everything else must join smoothly.
 KNOWN_SEAMS = {
     "plane": "shock-stall model near 308 m/s, outside the reachable envelope",
+    # The same aircraft, flying a moving setpoint: same plant, same seam.
+    "plane_steps": "shock-stall model near 308 m/s, unreachable (same plant as plane)",
+    "plane_sine": "shock-stall model near 308 m/s, unreachable (same plant as plane)",
     "plane3d_heading": "shock-stall model near 308 m/s, unreachable",
     "plane3d_circle": "shock-stall model near 308 m/s, unreachable",
     "plane3d_figure8": "shock-stall model near 308 m/s, unreachable",

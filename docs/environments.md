@@ -34,6 +34,8 @@ env, params = spec.make_env(), spec.params_cls()
 | Environment | Observation | Action | Tracked | PID | MPC | Physics |
 |---|---|---|---|---|---|---|
 | `plane` | (9,) | (2,) | altitude (m) | yes | yes | [contract](../src/target_gym/plane/PHYSICS.md) |
+| `plane_steps` | (9,) | (2,) | altitude (m) | yes | yes | [contract](../src/target_gym/plane/PHYSICS.md) |
+| `plane_sine` | (9,) | (2,) | altitude (m) | yes | yes | [contract](../src/target_gym/plane/PHYSICS.md) |
 | `plane3d_heading` | (15,) | (3,) | altitude (m) | yes | yes | [contract](../src/target_gym/plane3d/PHYSICS.md) |
 | `plane3d_circle` | (17,) | (3,) | altitude (m) | yes | yes | [contract](../src/target_gym/plane3d/PHYSICS.md) |
 | `plane3d_figure8` | (19,) | (3,) | altitude (m) | yes | yes | [contract](../src/target_gym/plane3d/PHYSICS.md) |

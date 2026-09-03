@@ -11,8 +11,13 @@ hide:
 </p>
 
 <p align="center">
-  <img src="videos/gallery_mosaic.webp" width="100%"/><br/>
-  <sub>Six of the eighteen, each held on setpoint by its shipped PID baseline.</sub>
+  <img src="videos/mosaic_plants.webp" width="100%"/><br/>
+  <sub>Twelve process, industrial and energy plants, each held on setpoint by its shipped PID baseline.</sub>
+</p>
+
+<p align="center">
+  <img src="videos/mosaic_aircraft.webp" width="100%"/><br/>
+  <sub>Eight aircraft tasks: altitude hold, step schedules, sinusoid tracking, and three 3D paths.</sub>
 </p>
 
 ---

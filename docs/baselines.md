@@ -189,7 +189,7 @@ that is worth knowing before you regenerate anything:
   which are tracked. The five tracked `figures/**/*.png` come from an older
   script and are not reproduced by `make figures`.
 - `make videos` writes the 3D aircraft tasks to `videos/plane3d_heading/` while
-  the committed gifs live at `videos/plane3d/heading_short.gif`.
+  the committed gifs live at `videos/<env>/pid_output.gif`.
 - Regenerating `cstr` produces a 5-frame 1400x750 gif where the committed one is
   80 frames at 760x407, so the episode length and figure size used for the
   committed media are not the current defaults.

@@ -55,6 +55,9 @@ class PlaneState(EnvState):
     stick: float
     fuel: float
     target_altitude: float
+    # The altitude sampled at reset. ``target_altitude`` is what is commanded
+    # *now*, which differs once a moving pattern is selected.
+    base_target_altitude: float = 0.0
     # Ornstein-Uhlenbeck turbulence gust (m/s), mean-reverting to 0.  Total wind
     # acting on the aircraft is params.wind_* + gust_*.  Default 0 => no gust.
     gust_x: float = 0.0
@@ -167,6 +170,23 @@ class PlaneParams(EnvParams):
     # aircraft, whose effect is in the velocities anyway.
     wind_lookahead: bool = False
     target_altitude_range: Tuple[float, float] = (3_000.0, 8_000.0)
+    # Commanded-altitude pattern. 0 = hold one altitude, which is what the
+    # shipped baselines are measured against and therefore the default; the rest
+    # make the setpoint move, which is a different and harder task -- a P
+    # controller cannot hold a ramp with zero error at all, and a sinusoid
+    # exposes the closed loop's bandwidth directly, since the amplitude ratio
+    # and phase lag against frequency *are* its frequency response.
+    #
+    #   0  hold      a single altitude, sampled at reset
+    #   1  steps     a staircase: discrete changes at fixed intervals
+    #   2  ramp      a constant climb or descent rate
+    #   3  sinusoid  a continuous oscillation about the sampled altitude
+    #   4  chirp     a sinusoid whose frequency rises through the episode
+    target_pattern: int = 0
+    target_amplitude: float = 800.0  # m, half-range of the moving patterns
+    target_period: float = 240.0  # s, one cycle of the sinusoid
+    target_steps: int = 4  # how many treads in the staircase
+    target_chirp_octaves: float = 2.0  # frequency multiple across a chirp
     initial_altitude_range: Tuple[float, float] = (3_000.0, 8_000.0)
     initial_z_dot: float = 0.0
     initial_x_dot: float = 200.0
@@ -280,6 +300,34 @@ def clip_acceleration(a: jnp.ndarray, min: tuple, max: tuple):
     return jnp.clip(a, min=jnp.array(min), max=jnp.array(max))
 
 
+def commanded_altitude(base: float, time, params: PlaneParams, xp=jnp):
+    """The altitude being commanded at this step.
+
+    ``base`` is the altitude sampled at reset; every moving pattern is written
+    as an excursion about it, so the aircraft always starts being asked for
+    something it can reach and the patterns stay inside the altitude envelope.
+
+    Branch-free on purpose: all five are evaluated and one is selected, so the
+    function traces to a single ``select`` and the pattern can live in params
+    rather than forcing a separate environment class per shape.
+    """
+    t = xp.asarray(time, dtype=jnp.float32) * params.delta_t
+    span = params.target_amplitude
+    total = xp.maximum(params.max_steps_in_episode * params.delta_t, 1.0)
+
+    hold = base
+    tread = xp.floor(t / (total / params.target_steps))
+    steps = base + span * (xp.mod(tread, 2.0) * 2.0 - 1.0) * 0.6
+    ramp = base + span * (2.0 * t / total - 1.0)
+    sine = base + span * xp.sin(2.0 * xp.pi * t / params.target_period)
+    rate = 1.0 + (params.target_chirp_octaves - 1.0) * (t / total)
+    chirp = base + span * xp.sin(2.0 * xp.pi * t * rate / params.target_period)
+
+    options = xp.stack([hold * xp.ones_like(t), steps, ramp, sine, chirp])
+    target = options[params.target_pattern]
+    return xp.clip(target, params.min_alt + span * 0.2, params.max_alt - span * 0.2)
+
+
 @partial(jax.jit, static_argnames=["integration_method"])
 def compute_next_state(
     power_requested: float,
@@ -390,7 +438,10 @@ def compute_next_state(
         stick=stick,
         fuel=fuel,
         time=state.time + 1,
-        target_altitude=state.target_altitude,
+        target_altitude=commanded_altitude(
+            state.base_target_altitude, state.time + 1, params
+        ),
+        base_target_altitude=state.base_target_altitude,
         gust_x=gust[0],
         gust_z=gust[1],
     )

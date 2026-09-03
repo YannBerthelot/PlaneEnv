@@ -37,6 +37,7 @@ _DIM = (74, 102, 120)  # render_kit DIM    #4a6678
 _ACCENT = (0, 188, 212)  # render_kit CYAN   #00bcd4
 _TARGET = (255, 202, 40)  # render_kit AMBER  #ffca28
 _GOOD = (102, 187, 106)  # render_kit GREEN  #66bb6a
+_CLOUD = (32, 46, 62)  # only just above the sky
 
 
 def _rotate_point(x, y, angle):
@@ -547,10 +548,8 @@ def render_side_scene(
     # Ground — only draw if visible on screen
     _, ground_sy = world_to_screen(0, 0)
     if ground_sy < panel_h:
-        pygame.draw.rect(
-            surf, (100, 160, 80), (0, ground_sy, panel_w, panel_h - ground_sy)
-        )
-        gfxdraw.hline(surf, 0, panel_w, min(ground_sy, panel_h - 1), (60, 100, 40))
+        pygame.draw.rect(surf, _GROUND, (0, ground_sy, panel_w, panel_h - ground_sy))
+        gfxdraw.hline(surf, 0, panel_w, min(ground_sy, panel_h - 1), _FRAME)
 
     # Subtle clouds behind (less visible)
     from target_gym.plane.rendering import draw_cloud
@@ -562,9 +561,12 @@ def render_side_scene(
             cloud_cy,
             scale=cscale * 0.7,
             seed=shape,
-            color=(200, 220, 240),
-            outline_color=(160, 180, 200),
-            outline_thickness=2,
+            # Barely above the sky. These were near-white, which against a dark
+            # field reads as holes in the image rather than as weather, and they
+            # were more visible than the aircraft.
+            color=_CLOUD,
+            outline_color=_CLOUD,
+            outline_thickness=1,
         )
 
     # ── Altitude scale (right edge) ──

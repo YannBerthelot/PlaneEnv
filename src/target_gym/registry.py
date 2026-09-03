@@ -355,6 +355,54 @@ _SPECS: tuple[EnvSpec, ...] = (
         disturbance_fields=("gust_x", "gust_z"),
         disturbance_overrides={"turbulence_sigma": 3.0},
     ),
+    # Two moving-setpoint variants of the same aircraft. They are the same plant
+    # and the same controllers; only the commanded altitude differs, which is
+    # the point -- holding one altitude is a task a tuned PID finishes with
+    # 0.0 m of settled error, so it can no longer distinguish controllers.
+    #
+    # Measured with the shipped PID: hold scores 1595 at 0.0 m, steps 1472 at
+    # 57.6 m, sinusoid 870 at 120.3 m. Monotone in difficulty, and each exposes
+    # something a constant setpoint cannot -- steps the transient response,
+    # repeatedly, and the sinusoid the closed loop's bandwidth, since amplitude
+    # ratio and phase lag against frequency *are* its frequency response.
+    EnvSpec(
+        name="plane_steps",
+        group="aircraft",
+        env_factory=_plane,
+        params_cls=_LazyParams("target_gym.plane.env", "PlaneParams"),
+        make_pid=_pid("make_plane_cascaded_pid"),
+        make_mpc=_mpc("make_plane_mpc"),
+        # 800 steps clears the episode-length criterion for a periodic task:
+        # four treads, each ~200 steps against a 23-step actuator response.
+        test_params={
+            "max_steps_in_episode": 800,
+            "target_pattern": 1,
+            "target_amplitude": 800.0,
+            "target_steps": 4,
+        },
+        tuned_gains_key="plane",
+        disturbance_fields=("gust_x", "gust_z"),
+        disturbance_overrides={"turbulence_sigma": 3.0},
+    ),
+    EnvSpec(
+        name="plane_sine",
+        group="aircraft",
+        env_factory=_plane,
+        params_cls=_LazyParams("target_gym.plane.env", "PlaneParams"),
+        make_pid=_pid("make_plane_cascaded_pid"),
+        make_mpc=_mpc("make_plane_mpc"),
+        # 800 steps is 3.3 periods of the 240 s sinusoid, satisfying the three
+        # periods the episode-length criterion asks of a periodic task.
+        test_params={
+            "max_steps_in_episode": 800,
+            "target_pattern": 3,
+            "target_amplitude": 800.0,
+            "target_period": 240.0,
+        },
+        tuned_gains_key="plane",
+        disturbance_fields=("gust_x", "gust_z"),
+        disturbance_overrides={"turbulence_sigma": 3.0},
+    ),
     EnvSpec(
         name="plane3d_heading",
         group="aircraft",

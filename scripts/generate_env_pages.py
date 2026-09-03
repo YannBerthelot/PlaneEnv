@@ -46,18 +46,14 @@ VIDEO_CANDIDATES = (
     "videos/{name}/pid_output_short.gif",
     "videos/{name}/pid_output.gif",
 )
+# ``target_gym.runners.runners`` writes videos/<env>/pid_output.gif, so that is
+# the path a page should use. This map is only for environments whose clip is
+# shared with another -- the two patrol variants render the same formation --
+# and it deliberately no longer points at videos/plane3d/*_short.gif, which were
+# hand-placed leftovers of an older layout that no generator refreshes. Those
+# went stale silently: the gallery showed pre-re-skin aircraft for a week.
 SPECIAL_VIDEOS = {
-    "plane3d_heading": "videos/plane3d/heading_short.gif",
-    "plane3d_circle": "videos/plane3d/circle_short.gif",
-    "plane3d_figure8": "videos/plane3d/figure8_short.gif",
-    "plane": "videos/plane/pid_output_short.gif",
-    "patrol": "videos/patrol/pid_formation_short.gif",
-    "patrol_bearing_only": "videos/patrol/pid_formation_short.gif",
-    "cstr": "videos/cstr/pid_output_short.gif",
-    "first_order": "videos/first_order/pid_output_short.gif",
-    "four_tank": "videos/four_tank/pid_output_short.gif",
-    "ph_neutralization": "videos/ph_neutralization/pid_output_short.gif",
-    "distillation": "videos/distillation/pid_output_short.gif",
+    "patrol_bearing_only": "videos/patrol/pid_output.gif",
 }
 
 

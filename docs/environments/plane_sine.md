@@ -1,13 +1,13 @@
-# Plane
+# Plane Sine
 
-<p align="center"><img src="../videos/plane/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/plane_sine/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|
 | Action space | `Box((2,))`, all actions in [-1, 1] |
 | Observation space | `Box((9,))` |
 | Tracked variable(s) | altitude (m) |
-| Episode length | 280 steps (280 s at dt = 1 s) |
+| Episode length | 800 steps (800 s at dt = 1 s) |
 | Import | `from target_gym import Airplane2D, PlaneParams` |
 
 ## Action space
@@ -42,23 +42,18 @@ Every environment in this suite scores on one contract: the reward is
 
 **Termination.** Return True if the episode should terminate.
 
-**Truncation.** After 280 steps.
+**Truncation.** After 800 steps.
 
 ## Baselines
 
-Measured over 10 seeds on a 280-step episode (see [Baselines](../baselines.md)):
-
-| controller | return | per step |
-|---|---|---|
-| PID | 170.7 | 0.609 |
-| MPC | 205.4 | 0.734 |
+A tuned PID ships with this environment.
 
 ## Arguments
 
 | parameter | default |
 |---|---|
 | `delta_t` | 1 |
-| `max_steps_in_episode` | 280 |
+| `max_steps_in_episode` | 800 |
 | `gravity` | 9.81 |
 | `initial_mass` | 73500 |
 | `thrust_output_at_sea_level` | 240000 |

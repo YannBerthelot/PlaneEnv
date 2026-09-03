@@ -14,8 +14,13 @@
 </p>
 
 <p align="center">
-  <img src="videos/gallery_mosaic.webp" width="100%"/><br/>
-  <sub>Six of the eighteen, each held on setpoint by its shipped PID baseline.</sub>
+  <img src="videos/mosaic_plants.webp" width="100%"/><br/>
+  <sub>Twelve process, industrial and energy plants, each held on setpoint by its shipped PID baseline.</sub>
+</p>
+
+<p align="center">
+  <img src="videos/mosaic_aircraft.webp" width="100%"/><br/>
+  <sub>Eight aircraft tasks: altitude hold, step schedules, sinusoid tracking, and three 3D paths.</sub>
 </p>
 
 ```bash
@@ -173,17 +178,17 @@ expert (PID) rollouts.
       <b>Plane 2D</b> -- reach & hold a target altitude
     </td>
     <td align="center">
-      <img src="videos/plane3d/heading_short.gif" width="300px"/><br/>
+      <img src="videos/plane3d_heading/pid_output.gif" width="300px"/><br/>
       <b>Plane 3D -- Heading</b> -- track altitude + heading
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="videos/plane3d/circle_short.gif" width="300px"/><br/>
+      <img src="videos/plane3d_circle/pid_output.gif" width="300px"/><br/>
       <b>Plane 3D -- Circle</b> -- sustained banked orbit
     </td>
     <td align="center">
-      <img src="videos/plane3d/figure8_short.gif" width="300px"/><br/>
+      <img src="videos/plane3d_figure8/pid_output.gif" width="300px"/><br/>
       <b>Plane 3D -- Figure-8</b> -- 3D twisted lemniscate
     </td>
   </tr>

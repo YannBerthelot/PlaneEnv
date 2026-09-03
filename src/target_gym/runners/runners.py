@@ -193,7 +193,7 @@ def figure_sweep(name: str, params=None, resolution: int = 9, plot: bool = True)
     """Constant-action sweep: what the plant does open-loop, across its range."""
     spec = REGISTRY[name]
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
     levels = np.linspace(-1.0, 1.0, resolution)
 
     runs = [rollout(spec, params, constant_policy(u, env, params))[0] for u in levels]
@@ -226,7 +226,7 @@ def figure_pid(name: str, params=None, n_seeds: int = 6, plot: bool = True):
     if not spec.has_pid:
         return None
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
 
     policy = pid_policy(spec)
     assert policy is not None  # guarded by has_pid above
@@ -252,11 +252,40 @@ def figure_pid(name: str, params=None, n_seeds: int = 6, plot: bool = True):
     return runs
 
 
+_MEDIA_MIN_STEPS = 600
+_MEDIA_MAX_STEPS = 1200
+
+
+def _media_params(spec):
+    """Parameters for a figure or a video: the environment as registered.
+
+    These used to be ``spec.params_cls()`` -- the bare dataclass defaults --
+    which quietly rendered something other than the registered environment.
+    ``plane_steps`` and ``plane_sine`` differ from ``plane`` only through
+    ``EnvSpec.test_params``, so with the defaults all three produced the same
+    clip, byte-identical down to a total reward of 9783.414.
+
+    Episode length is the one exception. The benchmark caps it to bound the cost
+    of measuring, and a 280-step clip is over before anything has happened, so
+    media keeps the environment's own longer default there.
+    """
+    params = spec.make_test_params()
+    steps = int(params.max_steps_in_episode)
+    default_steps = int(spec.params_cls().max_steps_in_episode)
+    # Long enough to be worth watching, short enough to stay readable: the
+    # aircraft's own default is 10 000 steps, which is 41 cycles of the sinusoid
+    # and unwatchable, while the benchmark's 280 is over before the climb ends.
+    target = min(max(steps, _MEDIA_MIN_STEPS), default_steps, _MEDIA_MAX_STEPS)
+    if target != steps:
+        params = params.replace(max_steps_in_episode=target)
+    return params
+
+
 def figure_comparison(name: str, params=None, n_seeds: int = 5, plot: bool = True):
     """Cumulative return of the best constant action, the PID and the MPC."""
     spec = REGISTRY[name]
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
 
     # Bracketing constants rather than a fine sweep: the point of the bar is
     # that the baselines beat open loop, not to find the optimal constant.
@@ -327,7 +356,7 @@ def video(name: str, params=None, seed: int = 0) -> str | None:
     if policy is None:
         return None
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
     folder = f"{VIDEO_DIR}/{name}"
     os.makedirs(folder, exist_ok=True)
     written = env.save_video(policy, seed, params=params, folder=folder, format="gif")

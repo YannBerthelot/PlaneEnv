@@ -1,7 +1,5 @@
 # Patrol
 
-<p align="center"><img src="../videos/patrol/pid_formation_short.gif" width="480px"/></p>
-
 Close-patrol (formation-keeping) environment: state, parameters and transition.
 
 | | |

@@ -157,6 +157,9 @@ class Airplane2D(environment.Environment[PlaneState, PlaneParams]):
             fuel=initial_fuel,
             time=0,
             target_altitude=target_altitude,
+            # What the moving patterns oscillate about; identical to
+            # target_altitude while the pattern is 'hold'.
+            base_target_altitude=target_altitude,
         )
 
         obs = self.get_obs(state, params)

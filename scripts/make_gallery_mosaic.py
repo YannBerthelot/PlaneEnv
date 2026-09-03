@@ -18,21 +18,46 @@ import pathlib
 from PIL import Image, ImageDraw, ImageSequence
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT_WEBP = ROOT / "videos" / "gallery_mosaic.webp"
-OUT_GIF = ROOT / "videos" / "gallery_mosaic.gif"
+
 
 # Six plants that between them show the range: an aircraft flying a 3D path, a
 # furnace, a drum boiler, a reactor, a coupled tank rig and a turbine.
-TILES = [
-    ("videos/plane3d_figure8/pid_output.gif", "Aircraft - figure-8"),
-    ("videos/glass_furnace/pid_output_short.gif", "Glass furnace"),
-    ("videos/boiler_drum/pid_output_short.gif", "Boiler drum"),
-    ("videos/reactor/pid_output_short.gif", "Nuclear reactor"),
-    ("videos/four_tank/pid_output_short.gif", "Four-tank"),
-    ("videos/wind_turbine/pid_output_short.gif", "Wind turbine"),
-]
+# Two mosaics rather than one. The aircraft and the plants are different kinds
+# of picture -- a vehicle moving through a scene against an instrument panel of
+# a process -- and mixing them made a grid where neither read well.
+SETS = {
+    "aircraft": (
+        3,
+        2,
+        [
+            ("videos/plane/pid_output.gif", "Altitude hold"),
+            ("videos/plane_steps/pid_output.gif", "Altitude - step schedule"),
+            ("videos/plane_sine/pid_output.gif", "Altitude - sinusoid"),
+            ("videos/plane3d_heading/pid_output.gif", "3D - heading"),
+            ("videos/plane3d_circle/pid_output.gif", "3D - circle"),
+            ("videos/plane3d_figure8/pid_output.gif", "3D - figure-8"),
+        ],
+    ),
+    "plants": (
+        4,
+        3,
+        [
+            ("videos/glass_furnace/pid_output_short.gif", "Glass furnace"),
+            ("videos/boiler_drum/pid_output_short.gif", "Boiler drum"),
+            ("videos/reactor/pid_output_short.gif", "Nuclear reactor"),
+            ("videos/cement_kiln/pid_output_short.gif", "Cement kiln"),
+            ("videos/battery/pid_output_short.gif", "Grid battery"),
+            ("videos/wind_turbine/pid_output_short.gif", "Wind turbine"),
+            ("videos/hvac/pid_output_short.gif", "Building HVAC"),
+            ("videos/four_tank/pid_output_short.gif", "Four-tank"),
+            ("videos/distillation/pid_output_short.gif", "Distillation"),
+            ("videos/ph_neutralization/pid_output_short.gif", "pH neutralisation"),
+            ("videos/cstr/pid_output_short.gif", "CSTR"),
+            ("videos/first_order/pid_output_short.gif", "First order"),
+        ],
+    ),
+}
 
-COLS, ROWS = 3, 2
 TILE_W, TILE_H = (
     646,
     346,
@@ -72,43 +97,47 @@ def _frames(path: pathlib.Path, n: int) -> list[Image.Image]:
 
 
 def main() -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--set", choices=sorted(SETS), default="plants")
+    args = ap.parse_args()
+    cols, rows, tiles = SETS[args.set]
+    out_webp = ROOT / "videos" / f"mosaic_{args.set}.webp"
+    out_gif = ROOT / "videos" / f"mosaic_{args.set}.gif"
+
     clips, labels = [], []
-    for rel, label in TILES:
+    for rel, label in tiles:
         path = ROOT / rel
         if not path.exists():
             print(f"  missing, skipped: {rel}")
             continue
         clips.append(_frames(path, N_FRAMES))
         labels.append(label)
-
     if not clips:
         print("no clips found")
         return 1
 
-    width = COLS * TILE_W + (COLS + 1) * PAD
-    height = ROWS * TILE_H + (ROWS + 1) * PAD
+    width = cols * TILE_W + (cols + 1) * PAD
+    height = rows * TILE_H + (rows + 1) * PAD
     frames = []
     for i in range(N_FRAMES):
         canvas = Image.new("RGB", (width, height), BG)
         draw = ImageDraw.Draw(canvas)
         for k, (clip, label) in enumerate(zip(clips, labels)):
-            col, row = k % COLS, k // COLS
+            col, row = k % cols, k // cols
             x = PAD + col * (TILE_W + PAD)
             y = PAD + row * (TILE_H + PAD)
             canvas.paste(clip[i], (x, y))
             draw.rectangle(
                 [x, y + TILE_H - LABEL_H, x + TILE_W, y + TILE_H], fill=LABEL_BG
             )
-            draw.text((x + 6, y + TILE_H - LABEL_H + 4), label, fill=LABEL_FG)
+            draw.text((x + 6, y + TILE_H - LABEL_H + 5), label, fill=LABEL_FG)
         frames.append(canvas)
 
-    OUT_WEBP.parent.mkdir(parents=True, exist_ok=True)
-    # Animated WebP, not GIF. GIF caps at 256 colours and compresses these
-    # instrument panels badly, so fitting one under a few megabytes meant
-    # downscaling the tiles to 400 px and losing the text on every gauge. WebP
-    # keeps the sources at their own 646x346 and still comes out smaller.
+    out_webp.parent.mkdir(parents=True, exist_ok=True)
     frames[0].save(
-        OUT_WEBP,
+        out_webp,
         format="WEBP",
         save_all=True,
         append_images=frames[1:],
@@ -117,19 +146,18 @@ def main() -> int:
         quality=QUALITY,
         method=6,
     )
-    mb = OUT_WEBP.stat().st_size / 1e6
     print(
-        f"  wrote {OUT_WEBP.relative_to(ROOT)}  {width}x{height}  {len(frames)} frames  {mb:.2f} MB"
+        f"  wrote {out_webp.relative_to(ROOT)}  {width}x{height}  "
+        f"{len(frames)} frames  {out_webp.stat().st_size / 1e6:.2f} MB"
     )
 
-    # A GIF alongside it, downscaled, for anywhere WebP is not rendered.
     small = [f.resize((width // 2, height // 2), Image.LANCZOS) for f in frames[::2]]
     palette = small[0].quantize(colors=COLORS, method=Image.MEDIANCUT)
     quantised = [
         f.quantize(palette=palette, dither=Image.FLOYDSTEINBERG) for f in small
     ]
     quantised[0].save(
-        OUT_GIF,
+        out_gif,
         save_all=True,
         append_images=quantised[1:],
         duration=DURATION_MS * 2,
@@ -137,8 +165,8 @@ def main() -> int:
         optimize=True,
     )
     print(
-        f"  wrote {OUT_GIF.relative_to(ROOT)}  fallback  "
-        f"{OUT_GIF.stat().st_size / 1e6:.2f} MB"
+        f"  wrote {out_gif.relative_to(ROOT)}  fallback  "
+        f"{out_gif.stat().st_size / 1e6:.2f} MB"
     )
     return 0
 

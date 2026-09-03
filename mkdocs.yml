@@ -85,6 +85,8 @@ nav:
       - Overview: environments.md
       - Aircraft:
           - Plane: environments/plane.md
+          - Plane Steps: environments/plane_steps.md
+          - Plane Sine: environments/plane_sine.md
           - Plane3D Heading: environments/plane3d_heading.md
           - Plane3D Circle: environments/plane3d_circle.md
           - Plane3D Figure8: environments/plane3d_figure8.md

@@ -1,6 +1,6 @@
 # Plane3D Figure8
 
-<p align="center"><img src="../videos/plane3d/figure8_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/plane3d_figure8/pid_output.gif" width="480px"/></p>
 
 3D airplane environment state, parameters, and transition logic.
 

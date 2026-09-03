@@ -184,3 +184,6 @@ logs*
 test_readme.py
 *.zip
 *.pdf
+
+# XLA persistent compilation cache (see tests/conftest.py)
+.jax_cache/

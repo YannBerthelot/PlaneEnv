@@ -66,6 +66,26 @@ jobs:
         enable-cache: true
         cache-dependency-glob: "uv.lock"
 
+    - name: Restore the XLA compilation cache
+      # Profiling found this suite's cost is compiling the plants, not stepping
+      # them: reverse-mode through an RK4 aircraft builds a large graph, and one
+      # tuner smoke test taking two gradient steps still cost 45 s of it. JAX can
+      # persist compiled executables keyed on the computation itself, which makes
+      # that a once-per-code-change cost instead of a once-per-push one.
+      # Measured locally over the whole fast suite: 217 s cold, 34.5 s warm.
+      #
+      # The key includes the sources, so a code change starts a fresh entry; the
+      # restore-keys prefix still seeds it from the last cache for this
+      # interpreter, and any computation that changed simply misses and is
+      # recompiled. Entries are keyed internally by jaxpr, backend and JAX
+      # version, so a stale one is never wrongly reused.
+      uses: actions/cache@v4
+      with:
+        path: .jax_cache
+        key: jax-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('src/**/*.py', 'uv.lock') }}
+        restore-keys: |
+          jax-${{ runner.os }}-py${{ matrix.python-version }}-
+
     - name: Install dependencies
       # --frozen fails loudly if uv.lock is out of date with pyproject.toml,
       # rather than silently resolving something else than what we tested.
@@ -94,10 +114,22 @@ jobs:
       run: uv run pytest tests/ -q -n auto --durations=10 -m "not slow" --cov=target_gym
 
   slow-test:
-    # Closed-loop controller contracts: PID beats the best constant action,
-    # MPC is at least as good as PID, episodes stay survivable across seeds.
-    # Minutes of rollouts that exercise the baselines rather than the
-    # environments, so they run on merges to main rather than on every push.
+    # Closed-loop contracts that still roll the plant out here: PID beats the
+    # best constant action, states stay bounded and physical under extreme
+    # actions, the regimes join. Minutes of rollouts that exercise the baselines
+    # rather than the environments, so they run on merges to main rather than on
+    # every push.
+    #
+    # The MPC-versus-PID contract used to live here and was most of the bill --
+    # profiled, [plane] alone took 836 s of a 19:47 job, and since xdist
+    # parallelises across tests rather than within one, that single test set
+    # roughly 70% of the wall-clock floor and came close to this job's
+    # 30-minute timeout on four slower cores. It is now asserted from
+    # data/baseline_returns.json, recorded by hand with
+    # scripts/record_baselines.py and guarded by a fingerprint of the physics,
+    # controllers, gains and parameters it was taken against. That moved it into
+    # the fast job above, where it runs on every push and across the whole
+    # matrix instead of once per merge on one interpreter.
     #
     # One interpreter is enough: what these assert is controller behaviour,
     # which does not vary across Python versions the way an import or a wheel
@@ -118,6 +150,26 @@ jobs:
         version: ${{ env.UV_VERSION }}
         enable-cache: true
         cache-dependency-glob: "uv.lock"
+
+    - name: Restore the XLA compilation cache
+      # Profiling found this suite's cost is compiling the plants, not stepping
+      # them: reverse-mode through an RK4 aircraft builds a large graph, and one
+      # tuner smoke test taking two gradient steps still cost 45 s of it. JAX can
+      # persist compiled executables keyed on the computation itself, which makes
+      # that a once-per-code-change cost instead of a once-per-push one.
+      # Measured locally over the whole fast suite: 217 s cold, 34.5 s warm.
+      #
+      # The key includes the sources, so a code change starts a fresh entry; the
+      # restore-keys prefix still seeds it from the last cache for this
+      # interpreter, and any computation that changed simply misses and is
+      # recompiled. Entries are keyed internally by jaxpr, backend and JAX
+      # version, so a stale one is never wrongly reused.
+      uses: actions/cache@v4
+      with:
+        path: .jax_cache
+        key: jax-${{ runner.os }}-py${{ env.UV_PYTHON }}-${{ hashFiles('src/**/*.py', 'uv.lock') }}
+        restore-keys: |
+          jax-${{ runner.os }}-py${{ env.UV_PYTHON }}-
 
     - name: Install dependencies
       run: uv sync --frozen --group dev

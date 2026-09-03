@@ -35,3 +35,42 @@ _XLA_SINGLE_THREAD = "--xla_cpu_multi_thread_eigen=false intra_op_parallelism_th
 os.environ["XLA_FLAGS"] = " ".join(
     filter(None, (os.environ.get("XLA_FLAGS", ""), _XLA_SINGLE_THREAD))
 )
+
+
+# XLA compilation, cached across processes and across runs.
+#
+# Profiling the fast job found its cost is not stepping the plants but
+# *compiling* them: the four aircraft tuner smoke tests take two gradient steps
+# each and still cost 149 s, because reverse-mode through an RK4 aircraft builds
+# a large graph, and shrinking the problem to 2 targets and 100 steps barely
+# moved them. The graph is the cost, not the rollout.
+#
+# JAX can persist compiled executables to disk, keyed on the computation itself,
+# so the same graph is only ever compiled once. Measured on one of those tests:
+# 44.9 s cold, 3.4 s warm. Under xdist every worker is a separate process, so a
+# shared directory also stops N workers each compiling the same thing; and in CI
+# the directory is restored from the actions cache, which is what makes it a
+# once-per-code-change cost rather than a once-per-push one.
+#
+# Entries are keyed by the jaxpr, the backend and the JAX version, so a stale
+# entry is never reused -- a changed computation simply misses.
+_CACHE_DIR = os.environ.get(
+    "TARGETGYM_JAX_CACHE",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".jax_cache"
+    ),
+)
+
+
+def pytest_configure(config):  # noqa: ARG001
+    """Enable the persistent compilation cache once the process has a JAX."""
+    try:
+        import jax
+    except ImportError:  # pragma: no cover - jax is a hard dependency
+        return
+    os.makedirs(_CACHE_DIR, exist_ok=True)
+    jax.config.update("jax_compilation_cache_dir", _CACHE_DIR)
+    # The defaults only cache compilations already costing over a second, which
+    # skips the many medium-sized graphs that make up most of this suite's bill.
+    jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)

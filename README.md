@@ -453,6 +453,12 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       versioned URL, built and deployed from the same workflow that tests it.
 * [ ] **Publish RL baseline results.** The environments claim a learned policy
       has something real to beat; no learned policy's numbers are published yet.
+      The harness is in place -- `data/rl_results.json`, written through
+      `target_gym.rl_results.record_result` and guarded by a fingerprint of the
+      environment, so a result recorded before a reward or dynamics change is
+      refused rather than quoted. Training runs outside this package (the
+      dependency goes RL-library-to-here, never the reverse); see
+      [docs/rl-baselines.md](docs/rl-baselines.md).
 * [x] **Drop the git dependency on `gymnax`.** Gone, and it turned out not to be
       needed. The pin tracked upstream `main` on the reasoning that released
       gymnax 1.0.0 caps `gymnasium<1.2` and that "conflicts with newer

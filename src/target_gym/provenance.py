@@ -54,6 +54,16 @@ _SHARED_SOURCES = (
     _ROOT / "integration.py",
 )
 
+# Shared *physics*: what a learned policy's score depends on, which is a
+# narrower set. A learned policy never runs a PID or an MPC, so re-tuning a
+# controller must not invalidate a training run that cost GPU-hours -- but a
+# change to the integrator, or to the reward helper every environment scores
+# through, absolutely must.
+_PHYSICS_SOURCES = (
+    _ROOT / "utils.py",
+    _ROOT / "integration.py",
+)
+
 
 def _stable_ast_digest(source: str) -> str:
     """Hash a module's structure, ignoring comments, docstrings and formatting.
@@ -159,6 +169,33 @@ def baseline_fingerprint(spec) -> str:
     h.update(_digest_paths(_SHARED_SOURCES).encode())
     h.update(json.dumps(values, sort_keys=True).encode())
     h.update(json.dumps(gains, sort_keys=True).encode())
+    return h.hexdigest()[:16]
+
+
+def environment_fingerprint(spec) -> str:
+    """Everything a *learned* policy's score depends on.
+
+    Deliberately narrower than :func:`baseline_fingerprint`: it covers the
+    environment's own modules, the shared physics, and the parameter values, but
+    not the controllers. An agent never calls a PID, so re-tuning one should not
+    invalidate a training run that cost GPU-hours; changing the integrator or the
+    reward every environment scores through should.
+
+    Composed separately rather than by reusing the baseline digest, so that
+    adding this could not change any fingerprint already recorded in
+    ``data/baseline_returns.json``.
+    """
+    params = spec.make_test_params()
+    values = {
+        k: repr(v)
+        for k, v in sorted(vars(params).items())
+        if isinstance(v, (int, float, bool, str, tuple))
+    }
+    h = hashlib.sha256()
+    h.update(b"env-v1")
+    h.update(_digest_paths(_env_sources(spec)).encode())
+    h.update(_digest_paths(_PHYSICS_SOURCES).encode())
+    h.update(json.dumps(values, sort_keys=True).encode())
     return h.hexdigest()[:16]
 
 

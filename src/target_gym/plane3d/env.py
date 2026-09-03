@@ -263,11 +263,6 @@ def path_reward(dist, state, params, xp=jnp):
     )
 
 
-def terminal_penalty(state, params, xp=jnp):
-    """Check terminal and return penalty flag."""
-    return xp.logical_or(state.z <= params.min_alt, state.z >= params.max_alt)
-
-
 # ─── Heading task reward ────────────────────────────────
 
 
@@ -412,22 +407,6 @@ def nearest_point_on_twisted_lemniscate(state: PlaneState3D, params: PlaneParams
     tangent_heading = jnp.arctan2(sign * ty, sign * tx)
 
     return nearest_dx, nearest_dy, nearest_dz, dist, tangent_heading
-
-
-def distance_to_lemniscate(state: PlaneState3D):
-    """2D distance from aircraft to the flat lemniscate (used in tests)."""
-    a = state.target_radius
-    cx, cy = state.target_x, state.target_y
-    t = jnp.linspace(-0.99 * jnp.pi / 4, 0.99 * jnp.pi / 4, 200)
-    r = a * jnp.sqrt(jnp.maximum(jnp.cos(2 * t), 0.0))
-    lx_r = cx + r * jnp.cos(t)
-    ly_r = cy + r * jnp.sin(t)
-    lx_l = cx - r * jnp.cos(t)
-    ly_l = cy - r * jnp.sin(t)
-    all_x = jnp.concatenate([lx_r, lx_l])
-    all_y = jnp.concatenate([ly_r, ly_l])
-    dists = jnp.sqrt((state.x - all_x) ** 2 + (state.y - all_y) ** 2 + 1e-8)
-    return jnp.min(dists)
 
 
 def compute_reward_figure8(state: PlaneState3D, params: PlaneParams3D, xp=jnp):

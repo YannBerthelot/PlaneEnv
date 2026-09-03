@@ -502,7 +502,7 @@ TargetGym tasks are designed to expose RL agents to **realistic control challeng
       one RK4 substep to two (see `plane3d/PHYSICS.md`). That is the honest cost
       of a converged trajectory: at one substep the altitude was 20 m out over
       150 steps, against a reward that resolves to 1 m.
-* [ ] **Apply the model review checklist to the other environments.** The
+* [x] **Apply the model review checklist to the other environments.** The
       aircraft work produced twelve checks in
       [docs/model-review-checklist.md](docs/model-review-checklist.md), derived
       from real defects rather than from good intentions. All twelve have now

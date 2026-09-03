@@ -104,24 +104,70 @@ Not used for headline numbers: REDQ, AVG, UDRL, TD3. They are fine algorithms
 and each invites "why that one?", which is a question a benchmark should not have
 to answer.
 
-## 6. Discount factor, chosen from physics
+## 6. Discount factor, fixed by rule and checked against physics
 
 A single `gamma` across this suite would be indefensible: `delta_t` ranges from
-0.05 s (first-order lag) to 900 s (building thermal mass), so `gamma = 0.99`
-means a 5-second horizon in one environment and a 25-hour one in another.
+0.05 s to 900 s, so `gamma = 0.99` means a five-second horizon in one
+environment and a twenty-five-hour one in another.
 
-Set the discount from *time*, not from steps:
+The first rule drafted here was `gamma = exp(-delta_t / tau)`, setting the
+horizon to a fixed number of the plant's own time constants. Measuring the time
+constants killed it. The reactor's tracked flux answers the control rod in **one
+step** -- prompt neutron response really is that fast -- so five time constants
+is a five-step horizon, while the agent must hold that flux for 1200 steps
+against xenon poisoning it cannot see resolve. The wind turbine and battery are
+the same shape. A horizon set from the actuator response would have made three
+environments myopic by construction.
 
-    gamma = exp(-delta_t / tau)
+**The rule is therefore the episode:**
 
-with `tau` a fixed multiple of the plant's dominant time constant — the same
-quantity the PID tuning already reasons about, and documented per environment in
-its `PHYSICS.md`. This makes the agent's effective horizon a physical statement
-("about five settling times") that is the same claim in every environment,
-rather than an arbitrary constant that means something different in each.
+    gamma = 1 - 1/N          (N = the environment's own episode length)
 
-The multiple is fixed across the suite and published; it is not tuned per
-environment, because that would be tuning the objective rather than the agent.
+Two reasons. Evaluation scores the *undiscounted* return over exactly N steps,
+so setting the effective horizon to N aligns what the agent optimises with what
+it is measured on; any shorter and the agent is deliberately blind to part of
+its own score. And it removes `gamma` as a free parameter — it cannot be tuned
+to flatter one side, which matters for a comparison whose result is the point.
+
+`gamma` is **not** in the hyperparameter search for that reason.
+
+### What the measurement is still for
+
+The physics check has not gone away, it has changed job: it verifies that the
+horizon covers the plant's open-loop response, measured as the actuator-to-output
+step response (time to 63.2% of the total change, the quantity relay tuning
+assumes). Where it does not, that is a property of the environment worth knowing
+before reading any result from it.
+
+| environment | N | tau (steps) | 5·tau | gamma |
+| --- | --- | --- | --- | --- |
+| cstr | 100 | 5 | 25 | 0.99000 |
+| first_order | 100 | 10 | 50 | 0.99000 |
+| hvac | 192 | 62 | **310** | 0.99479 |
+| plane | 200 | 23 | 115 | 0.99500 |
+| plane3d_heading | 200 | 14 | 70 | 0.99500 |
+| plane3d_circle | 200 | 14 | 70 | 0.99500 |
+| plane3d_figure8 | 200 | 38 | 190 | 0.99500 |
+| patrol | 200 | 13 | 65 | 0.99500 |
+| patrol_bearing_only | 200 | 12 | 60 | 0.99500 |
+| distillation | 200 | 8 | 40 | 0.99500 |
+| glass_furnace | 240 | 132 | **660** | 0.99583 |
+| cement_kiln | 240 | 58 | **290** | 0.99583 |
+| battery | 360 | 1 | 5 | 0.99722 |
+| boiler_drum | 400 | 3 | 15 | 0.99750 |
+| wind_turbine | 400 | 1 | 5 | 0.99750 |
+| four_tank | 500 | 38 | 190 | 0.99800 |
+| ph_neutralization | 300 | 14 | 70 | 0.99667 |
+| reactor | 1200 | 1 | 5 | 0.99917 |
+
+**Three environments are evaluated over less than a full settling.** The glass
+furnace would need 2.8x its episode for five open-loop time constants, HVAC
+1.6x, the cement kiln 1.2x. On those, no controller -- classical or learned --
+can demonstrate steady-state holding, and every score there is partly a measure
+of the approach rather than of maintenance. That is a real limitation of the
+suite and is recorded rather than corrected here: lengthening those episodes
+would invalidate every baseline number in the repository, so it is a deliberate
+decision to take separately.
 
 ## 7. Hyperparameters, and why they must be tuned
 
@@ -145,6 +191,55 @@ maximum of many noisy draws and is biased upward; reporting it on the same seeds
 publishes that bias. Search on agent seeds 0–2, report on 10–39. This is the
 discipline the aircraft PID tuner already follows — searched on seeds 0–2, quoted
 on held-out 3–9 — and the learned side is held to the same rule.
+
+### The search space
+
+Published here so that "tuned" means one mechanical procedure rather than the
+experimenter's taste, and so a reader can see what was and was not allowed to
+vary. It is identical for every environment.
+
+**Shared**
+
+| parameter | values |
+| --- | --- |
+| hidden sizes | `(64, 64)`, `(256, 256)`, `(400, 300)` |
+| activation | `tanh`, `relu` |
+| learning rate | log-uniform `[1e-4, 3e-3]` |
+| observation normalisation | **fixed on** — not searched |
+| `gamma` | **fixed by the rule in section 6** — not searched |
+
+**SAC**
+
+| parameter | values |
+| --- | --- |
+| batch size | `128`, `256`, `512` |
+| `tau` (target smoothing) | `0.005`, `0.02` |
+| target entropy scale | `0.5`, `1.0` (times `-dim(A)`) |
+| gradient steps per env step | `0.25`, `0.5`, `1.0` |
+| `n_envs` | `16`, `64` |
+
+**PPO**
+
+| parameter | values |
+| --- | --- |
+| rollout length | `128`, `512` |
+| clip range | `0.1`, `0.2`, `0.3` |
+| entropy coefficient | log-uniform `[1e-5, 1e-2]` |
+| GAE `lambda` | `0.9`, `0.95`, `0.99` |
+| epochs per batch | `4`, `10` |
+| `n_envs` | `64`, `256` |
+
+Ranges are the conventional ones for continuous control rather than anything
+bespoke; the point is that they were chosen before any result existed, not that
+they are optimal. Two entries deserve their exclusions explained. `gamma` is
+fixed because it sets what the agent is asked to optimise, and tuning the
+objective is not tuning the agent. Observation normalisation is fixed because
+the alternative is not a worse agent but a different experiment -- see below.
+
+Budget: **64 TPE trials per environment per algorithm**, 3 agent seeds each,
+selected on the mean of the trial's seeds. Roughly proportionate to what the
+classical side received: the aircraft PID search is a coordinate descent over
+seven gains, and the glass furnace's is a 90-point grid.
 
 **Observation normalisation is on, always, and is not a tuned choice.**
 Observations span 9e-3 to 8.4e3 across the suite and about four orders of

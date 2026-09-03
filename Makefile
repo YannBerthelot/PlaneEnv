@@ -9,6 +9,7 @@ CPU_ENV := CUDA_VISIBLE_DEVICES="" JAX_PLATFORMS=cpu JAX_PLATFORM_NAME=cpu
 .PHONY: ci ci-lint ci-format-check ci-test help install \
         all all-% figures figures-% videos videos-% tuning tuning-% \
         clear-tuning clear-mpc short-gifs baselines baselines-% \
+        time-constants \
         test test-all mypy coverage \
         missing-annotations type lint format check-codestyle commit-checks \
         mypy-all
@@ -74,6 +75,9 @@ baselines:  ## Re-measure the recorded MPC-vs-PID baselines (slow, by hand)
 
 baselines-%:  ## Re-measure one environment's recorded baseline
 	uv run python scripts/record_baselines.py --envs $*
+
+time-constants:  ## Measure each plant's actuator-to-output time constant
+	uv run python scripts/measure_time_constants.py
 
 clear-mpc:
 	rm -rf data/mpc_cache data/interpolators

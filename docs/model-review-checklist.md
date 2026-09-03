@@ -399,6 +399,57 @@ deliberate — one is differentiable and jit-friendly, the other is cheap to ste
 from Python — so the duplication is not itself the defect. Silently diverging
 is.
 
+## 13. Does a reduced prediction model still answer the actuator like the plant?
+
+**What went wrong.** Every CasADi MPC here optimises against a hand-reduced
+model of its environment, and the glass furnace's reduction changed the model's
+response to fuel. That does not make the controller noisy, which is what one
+looks for; it makes it settle in the *wrong place*, because an MPC drives its
+own **predicted** error to zero and predicted is not actual. It re-measures the
+true state every step, so nothing accumulates and nothing looks wrong -- it
+simply picks the same slightly-wrong fuel flow again, forever, with no
+integrator to notice. A PID needs no model and its integrator does not care
+about gain error at all, so the two diverge only at steady state.
+
+Measured, the furnace MPC finished 16% behind its own PID and lost 10 seeds out
+of 10.
+
+**How to check.** No optimiser required, which is what makes it cheap. Take
+states from a real rollout, hand the same state and the same action to the MPC's
+own prediction model, advance both by one control interval, and compare the
+tracked output. A model that tracks the plant gives a mean signed error near
+zero. A reduction that changed the response gives a persistent *one-signed*
+error, and that is what integrates into a standing offset.
+
+    do_mpc.simulator.Simulator(mpc._mpc.model)   # integration_tool="idas" if
+                                                 # the model has algebraic vars
+
+**What it finds here.** On the glass furnace the plant runs **+0.0275 K per
+control interval hotter than the model**, one-signed on 71% of settled steps.
+Per step that is nothing. Multiplied by the plant's own 132-step time constant
+it is **3.6 K** -- which is precisely the 2-6 K plateau the closed-loop deciles
+showed, so the mechanism is quantified rather than argued.
+
+**Why the reduction looked safe when it was written.** The reasoning is in the
+class docstring and is worth reading as a specimen. One bullet keeps the
+regenerator *because* "a controller blind to it mis-predicts the steady-state
+gain badly"; the next averages away the reversal cycle because "predicting its
+phase buys nothing". The second is true about *phase* and slides silently from
+"I do not need the phase" to "I may replace the oscillation with its mean",
+which holds only if everything downstream is linear in those temperatures.
+Radiative coupling goes as T^4. Measured, the two chambers sit 86 K apart on
+average and 242 K at worst, and their average has a third of the real swing.
+
+**And nothing could have caught it.** The MPC's contract at the time ran a
+240-step episode, which ends while *both* controllers are still on their way to
+the setpoint -- the deciles show them identical over exactly that span. A
+steady-state offset cannot be found by a measurement that never reaches steady
+state. It sat at "1.3% behind, passing" until the episode-length audit
+lengthened that episode to 1600 steps.
+
+**What it applies to.** Every environment whose MPC plans against a reduced
+model, which here is all seven CasADi ones. None had this comparison before.
+
 ---
 
 ## Open items this produced
@@ -415,12 +466,16 @@ is.
   of the strict xfail is now a passing test. **The figure-8 remains open** and is
   still a strict xfail at 1.3-2.7 km, with the integrator, the loop-gain
   scheduling and the speed schedule all now ruled out by measurement.
-- **A test episode shorter than the task's own period proves nothing.** These
-  tasks are exercised over `max_steps_in_episode=200`, which at `dt = 1 s` is
-  200 s against a 264 s lap, and the aircraft is initialised exactly on the
-  path -- so a controller that simply flies straight ahead looks correct for the
-  whole episode. Every periodic or path-following task needs an episode of
-  several periods before any expert-quality claim about it means anything.
+- ~~**A test episode shorter than the task's own period proves nothing.**~~
+  Fixed, and it needed a second criterion to find. These tasks were exercised
+  over `max_steps_in_episode=200`, which at `dt = 1 s` is less than one lap of a
+  221-264 s circuit, with the aircraft initialised exactly on the path -- so a
+  controller that simply flew straight ahead looked correct for the whole
+  episode. The circle is the instructive case: at 14.3 open-loop time constants
+  it passed every settling-based check comfortably while being scored over
+  **0.76 of a single lap**. Benchmark episodes now satisfy
+  `N >= max(10 * tau_actuator, 3 * T_period)`; six were below it and were
+  lengthened. See the episode-length section of docs/rl-protocol.md.
 - ~~The reward-shaping phase should apply checks 1 and 2 to every environment
   with a band or tolerance parameter.~~ Done: all eighteen now share one
   log-scaled, bounded reward contract. See `docs/reward-shaping.md`.

@@ -5,16 +5,38 @@ objective is to reach and hold a subset of the state space against
 disturbances, not to reach a goal and stop. Holding a setpoint, forever, is
 what industrial control actually is.
 
+### Start here
+
 | | |
 |---|---|
 | **[Getting started](getting-started.md)** | Install, run an episode, plug into Gymnasium or a JAX training loop |
 | **[Environment reference](environments.md)** | All eighteen: shapes, tracked variables, baselines, physics contracts |
 | **[Public API](api.md)** | What is stable, what is not, and what changes at 1.0 |
-| **[Baselines](baselines.md)** | The shipped PID and MPC controllers, and how to tune them |
-| **[Reward shaping](reward-shaping.md)** | Why the tracking rewards have the shape they do, with the measurements |
-| **[Model review checklist](model-review-checklist.md)** | Eleven checks derived from real defects, and what they find across the environments |
+
+### Beating the baselines
+
+| | |
+|---|---|
+| **[Baselines](baselines.md)** | The shipped PID and MPC controllers, how they score, and where they are weak |
+| **[RL protocol](rl-protocol.md)** | The measurement rules for learned policies, fixed before any number existed |
+| **[RL results](rl-baselines.md)** | Where learned-policy numbers go, and what stops a stale one being quoted |
+
+### Why you can trust the numbers
+
+| | |
+|---|---|
 | **[Physics methodology](PHYSICS_METHODOLOGY.md)** | How each environment's physics is sourced, validated and bounded |
+| **[Model review checklist](model-review-checklist.md)** | Thirteen checks derived from real defects, with what each one finds across the eighteen |
+| **[Reward shaping](reward-shaping.md)** | Why the tracking rewards have the shape they do, with the measurements |
+| **[Testing](testing.md)** | What runs in CI, what is recorded by hand, and why |
+
+### Contributing
+
+| | |
+|---|---|
 | **[Contributing](../CONTRIBUTING.md)** | Tests, style, and what adding an environment involves |
+| **[Roadmap and known gaps](roadmap.md)** | What is done, what is next, and what is broken and recorded |
+| **[Functional structure](functional-structure.md)** | What is already monadic here, and what JAX will not support |
 
 ## What makes these environments different
 

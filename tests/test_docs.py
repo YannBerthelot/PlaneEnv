@@ -39,7 +39,7 @@ def _runnable_blocks(path: pathlib.Path) -> list[str]:
 
 def _doc_cases() -> list[tuple[str, str]]:
     cases = []
-    for md in sorted(DOCS.glob("*.md")):
+    for md in [ROOT / "README.md", *sorted(DOCS.glob("*.md"))]:
         for i, code in enumerate(_runnable_blocks(md)):
             cases.append(pytest.param(code, id=f"{md.name}:{i}"))
     return cases
@@ -61,7 +61,13 @@ def test_environment_reference_is_in_sync_with_the_registry():
 
 @pytest.mark.parametrize("code", _doc_cases())
 def test_documented_example_runs(code, tmp_path, monkeypatch):
-    """Every runnable example in docs/ executes without raising."""
+    """Every runnable example in the README and docs/ executes without raising.
+
+    The README is included because it is the highest-traffic surface in the
+    project and its quickstart is the first code anyone runs. The first version
+    of that quickstart imported a name the package does not export, and nothing
+    would have caught it -- this test globbed ``docs/`` only.
+    """
     monkeypatch.chdir(tmp_path)
     exec(compile(code, "<doc>", "exec"), {"__name__": "__doc_example__"})
 

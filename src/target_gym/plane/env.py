@@ -323,10 +323,13 @@ def compute_reward(state: PlaneState, params: PlaneParams, xp=jnp):
 
 def get_obs(state: PlaneState, params: PlaneParams = None, xp=jnp):
     """Applies observation function to state."""
-    params_target_speed = jnp.asarray(
-        PlaneParams().target_speed if params is None else params.target_speed,
-        dtype=jnp.float32,
-    )
+    if params is None:
+        raise ValueError(
+            "get_obs needs the episode's params: target_speed is a parameter, "
+            "so falling back to PlaneParams() would silently report the class "
+            "default instead of what this episode is actually commanding."
+        )
+    params_target_speed = jnp.asarray(params.target_speed, dtype=jnp.float32)
     return xp.stack(
         [
             state.x_dot,

@@ -256,3 +256,24 @@ The refinement costs ~5× throughput and lands beside the plane — comfortably
 above the reactor, which the library already ships. Buying this much fidelity
 was affordable precisely because the furnace started as the cheapest non-trivial
 environment in the library.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `glass_furnace` | 1600 | 30 | 13.3 h | 1 in [-1, 1] | 5 | 26 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

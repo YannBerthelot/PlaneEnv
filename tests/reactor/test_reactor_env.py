@@ -7,7 +7,6 @@ from target_gym.reactor.env import (
     BETA_TOT,
     LAMBDA_I,
     N_GROUPS,
-    N_SETPOINTS,
     ReactorParams,
     ReactorState,
     check_is_terminal,
@@ -32,9 +31,9 @@ def _default_state(
         I_hat=I_hat,
         Xe_hat=Xe_hat,
         target_n=target,
-        target_schedule=jnp.full((N_SETPOINTS,), target),
         demand_key=jax.random.PRNGKey(42),
         rho_ext=jnp.zeros(()),
+        rho_ext_cmd=0.0,
     )
 
 

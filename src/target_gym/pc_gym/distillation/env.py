@@ -87,8 +87,12 @@ class DistillationParams(EnvParams):
     xB_ceiling: float = 0.10  # bottoms purity lost
 
     # ---- Reward shaping ----
-    # Purity errors are small numbers, so the band is small too: 0.01 mole
-    # fraction is the scale on which this column is actually operated.
+    # Error scale for the MPC's tracking term, in mole fraction. Not read by
+    # ``compute_reward``, which normalises by the full [0, 1] envelope under a
+    # log; this is the planner's quadratic surrogate scale. 0.02 is about the
+    # width this column is actually operated over. A band the reward ignores
+    # and the controller steers by is worth watching: the glass furnace had one
+    # inherited from a deleted reward and it cost 16% against its own PID.
     tracking_band: float = 0.02
     precision_floor: float = 1e-4  # mole fraction, online analyser resolution
     # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
@@ -101,7 +105,7 @@ class DistillationParams(EnvParams):
     # quadratic tracking surrogate made that the optimum of the objective it
     # was given. The field and the term stay, so a weight can be restored
     # once there is a defensible way to set it. See docs/roadmap.md.
-    boilup_cost_weight: float = 0.0  # was 0.05  # reboiler duty is the running cost
+    boilup_cost_weight: float = 0.0  # was 0.05; reboiler duty is the running cost
 
     # ---- Targets ----
     target_yD_range: Tuple[float, float] = (0.980, 0.995)

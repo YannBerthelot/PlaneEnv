@@ -146,6 +146,16 @@ only the daily cycle plus noise.
 cooling/heating changeover are out of scope. Over-heating is penalised but
 cannot be corrected except by backing off the heat.
 
+**The 35 °C trip is still reachable only through the actuator**, which was
+worth checking, because a terminal state the controller has no authority over
+would be unlike every other trip in this suite. Peak free gain is 5.6 kW --
+4.8 kW of solar through the glazing plus 0.8 kW of occupancy -- against a heat
+loss coefficient of 159.4 W/K, so the *steady* rise above outdoor would be
+35 K, which on a 10 °C afternoon points at 45 °C. It never gets there: solar is
+zero for twelve hours a day and the 43 h thermal mass integrates, so with the
+heater held fully off the zone peaks at 21.6 to 24.2 °C across seeds. Reaching
+the trip requires the heater, so it is the controller's to avoid.
+
 **⚠️ D3 — solar gain ignores orientation and shading.** A single glazing area
 with one sinusoidal profile; a real zone has orientation-dependent gains and
 self-shading.
@@ -173,3 +183,24 @@ is exactly the trade the reward asks for.
 Throughput: **17.7 M steps/s** — two differential states with closed-form
 algebraic nodes make this one of the cheapest environments in the library,
 second only to CSTR.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `hvac` | 720 | 900 | 180.0 h | 1 in [-1, 1] | 7 | 9 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

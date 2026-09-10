@@ -119,6 +119,14 @@ class DistillationColumn(
         # ramp: a running column is at steady state, and with a ~194 min
         # dominant time constant an arbitrary start would spend the whole
         # episode relaxing instead of being controlled.
+        #
+        # It is the steady state for the *nominal* reflux, 2.706, not for the L
+        # sampled just above, so the derivative at t = 0 is not quite zero. That
+        # is deliberate: converging a profile per episode would cost 4000
+        # integration steps at reset, and on a plant with RGA around 50 a two
+        # percent reflux offset is a meaningful and cheap initial-condition
+        # spread. It does mean the column starts near, rather than at, its own
+        # steady state.
         x = _NOMINAL_PROFILE
 
         state = DistillationState(

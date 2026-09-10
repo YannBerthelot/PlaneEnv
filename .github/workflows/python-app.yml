@@ -76,6 +76,11 @@ jobs:
         uv run python scripts/generate_env_reference.py --check
         uv run python scripts/generate_env_pages.py --check
 
+    - name: Check the documentation still describes the code
+      run: |
+        uv run python scripts/generate_physics_facts.py --check
+        uv run python scripts/check_doc_drift.py --check
+
     - name: Check no environment changed without a version bump
       run: uv run python scripts/stamp_env_versions.py --check
 

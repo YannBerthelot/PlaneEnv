@@ -104,14 +104,14 @@ class HVACParams(EnvParams):
     setpoint_occupied_range: Tuple[float, float] = (20.0, 22.5)
 
     # ---- Comfort / termination bounds ----
-    T_air_min: float = 5.0
-    precision_floor: float = (
-        0.1  # K, room temperature sensor resolution  # C, building left to freeze
-    )
+    T_air_min: float = 5.0  # C, building left to freeze
+    precision_floor: float = 0.1  # K, room temperature sensor resolution
     T_air_max: float = 35.0  # C, grossly overheated
 
     # ---- Reward shaping ----
-    comfort_band: float = 1.0  # C, error at which tracking reward halves
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    comfort_band: float = 1.0  # C
     # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
     # A running cost is a real part of every one of these plants, but its
     # weight against tracking accuracy is a design decision this library has
@@ -122,7 +122,7 @@ class HVACParams(EnvParams):
     # quadratic tracking surrogate made that the optimum of the objective it
     # was given. The field and the term stay, so a weight can be restored
     # once there is a defensible way to set it. See docs/roadmap.md.
-    energy_weight: float = 0.0  # was 0.15  # relative to the [0,1] comfort term
+    energy_weight: float = 0.0  # was 0.15, against the [0, 1] comfort term
 
     # ---- Initial conditions ----
     initial_T_range: Tuple[float, float] = (18.0, 22.0)

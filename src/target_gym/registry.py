@@ -519,7 +519,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_mpc=_mpc("make_plane3d_mpc"),
         # A lap is two legs plus two half-circles: 2 * (2 * 2r) + 2 * pi * r,
         # about 8.3 r of path. At an 8.4 km radius and 230 m/s that is ~300 s,
-        # so 900 steps is the three laps the episode-length criterion asks of a
+        # so 650 steps is the three laps the episode-length criterion asks of a
         # periodic task.
         test_params={"max_steps_in_episode": 650},
         tuned_gains_key="plane3d_racetrack",
@@ -706,12 +706,23 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.reactor.env", "ReactorParams"),
         make_pid=_pid("make_reactor_stateful_pid"),
         make_mpc=_mpc("make_reactor_mpc"),
-        # max_steps_in_episode is in *physics* steps; the reactor runs
-        # ``control_period`` (10) of them per env step, so this is 120 env steps.
-        test_params={"max_steps_in_episode": 1200},
-        # 8640 physics steps = 864 control steps = 2.4 h, long enough for the
-        # xenon/demand dynamics to actually distinguish a controller.
-        effectiveness_overrides={"max_steps_in_episode": 8640},
+        # In *physics* steps; the reactor runs ``control_period`` (10) of them
+        # per env step, so 8640 is 864 env steps, 2.4 h.
+        #
+        # This used to be 1200, twenty minutes, with 8640 applied only through
+        # ``effectiveness_overrides`` on the stated grounds that the shorter one
+        # was not long enough "for the xenon/demand dynamics to actually
+        # distinguish a controller". So the recorded baseline and the
+        # conformance check ran different tasks, and the published one was the
+        # one without the environment's headline physics: over twenty minutes
+        # the xenon state moves 2.5%, against a 13.2 h time constant.
+        #
+        # 2.4 h is 0.18 xenon time constants, enough that the poison moves
+        # materially while the controller works. Full pit dynamics would need
+        # about ten hours, which alone would cost more to record than the rest
+        # of the suite together. The override is gone: both now measure the
+        # same task.
+        test_params={"max_steps_in_episode": 8640},
         tuned_gains_key="reactor",
     ),
     EnvSpec(
@@ -721,8 +732,10 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.hvac.env", "HVACParams"),
         make_pid=_pid("make_hvac_stateful_pid"),
         make_mpc=_mpc("make_hvac_mpc"),
-        # 2 days at dt=900 s. Long enough to cover two setback recoveries and
-        # two solar cycles, which is what distinguishes controllers here.
+        # 720 steps at dt = 900 s is 7.5 days, so fifteen setback recoveries
+        # and as many solar cycles -- which is what distinguishes controllers
+        # here. (This comment read "2 days" long after the episode-length audit
+        # raised it from the 192 steps that actually was two days.)
         test_params={"max_steps_in_episode": 720},
         tuned_gains_key="hvac",
         disturbance_fields=("weather_dev",),
@@ -734,9 +747,11 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.cement_kiln.env", "CementKilnParams"),
         make_pid=_pid("make_cement_kiln_stateful_pid"),
         make_mpc=_mpc("make_cement_kiln_mpc"),
-        # 240 steps = 2 hours at dt = 30 s, about five transport delays -- long
-        # enough that a controller has to live with the consequences of its
-        # own earlier fuel changes.
+        # 700 steps = 5.8 hours at dt = 30 s, about fourteen transport delays,
+        # so a controller lives with the consequences of its own fuel changes
+        # many times over. (This comment read "240 steps = 2 hours ... about
+        # five transport delays" long after the episode-length audit raised it
+        # to 700.)
         test_params={"max_steps_in_episode": 700},
         tuned_gains_key="cement_kiln",
         disturbance_fields=("raw_meal",),

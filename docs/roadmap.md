@@ -171,11 +171,16 @@ what is broken and recorded rather than hidden.
       unresolvable entry point has to fall back to hashing the entire file.
 
 * [ ] **Find a defensible framing for running cost, then put it back.**
-      Seven environments carried a consumption term in their reward -- fuel on
+      Six environments carried a consumption term in their reward -- fuel on
       the glass furnace, the boiler drum and the cement kiln, energy on the
-      building, reboiler duty on the column, reagent on the pH loop, import cost
-      on the battery. All seven are zero for the 0.6 line, and the tasks score
-      setpoint tracking alone. The fields and the terms are still there, so
+      building, reboiler duty on the column, and reagent on the pH loop. All six
+      are zero for the 0.6 line, and those tasks score setpoint tracking alone.
+
+      The battery is not among them, though it was for a few hours. Its
+      `cost_weight` gates degradation and state-of-charge comfort rather than
+      pricing an input, and those keep the problem well posed rather than
+      trading against it -- which is the distinction this item has to get right
+      before restoring any weight anywhere. The fields and the terms are still there, so
       restoring a weight is a one-line change once there is a reason to pick a
       particular one.
 
@@ -239,6 +244,83 @@ what is broken and recorded rather than hidden.
       stated tolerance, so a divergence is a test failure rather than a slow
       loss of baseline quality.
 
+* [x] **A check for code that has drifted from its own documentation.**
+      These contracts are what a reader consults *instead of* the code, so a
+      stale one does not merely age, it actively misinforms. Reviewing all
+      twenty-one environments found this to be the repository's most common
+      defect, and three of that review's own findings were wrong because of it:
+      a deviation claiming post-stall lift decays to zero when the fix had long
+      been implemented and a duplicate was written and reverted on the strength
+      of it; a docstring saying sub-step rewards are summed when the code takes
+      their mean; and a deviation crediting a reward fix to a band the reward
+      does not read.
+
+      **Done**, as `scripts/check_doc_drift.py`, run by `make ci-docs`, by CI
+      and by `tests/test_docs.py`. Four checks, all mechanical: a contract
+      naming a symbol its package no longer defines, allowing sentences that
+      say a thing *used to* exist; a parameter whose comment claims the reward
+      uses it when no reward function references it; an episode-length comment
+      quoting a number that disagrees with the value beside it; and a comment
+      containing a second `#`, which is the whole signature of the formatter
+      merge that damaged five contract files.
+
+      On its first run, after the manual review had already swept by hand, it
+      found three more: `slot_tolerance` still driving a Gaussian in
+      `patrol/marl.py` after the single-agent reward migrated away from one an
+      hour earlier, a racetrack comment quoting 900 steps against a value of
+      650, and the doubled `# bar` the manual pass had noticed and not fixed.
+
+      The fifth check, a deviation whose defect no longer appears in the code,
+      needs judgement and is deliberately left out rather than approximated
+      badly. The two items below are how to reach it.
+
+* [x] **Generate the derived numbers into each `PHYSICS.md`.**
+      `docs/environments.md` has never drifted, because a generator writes it
+      and CI checks it. Nothing else gets that treatment, and the drift is
+      concentrated where it is missing.
+
+      Extend the generator to emit a per-environment facts block between
+      markers, computed from the registry and the params: episode length in
+      steps, seconds and time constants; `delta_t`; action bounds; the
+      observation layout with which state fields are hidden; terminal
+      conditions; the reward's envelope and floor. Then `--check` fails when a
+      file's block no longer matches.
+
+      This is *less* maintenance than today, not more: generated text cannot be
+      wrong and nobody has to update it.
+
+      **Done**, as `scripts/generate_physics_facts.py`, writing a block into all
+      fifteen contracts between markers and checked by `make ci-docs`, CI and
+      `tests/test_docs.py`. It carries episode length in steps and in wall time,
+      `delta_t`, the action dimension and bounds, the observation width and the
+      float-state count, whose gap is what the controller cannot see.
+
+      Deliberately narrow. Only facts that can be *computed* go in the block;
+      everything a contract says about why a number is what it is, what the
+      plant is, what is omitted and where the model stops being valid stays
+      hand-written, because none of it can be derived and all of it is the point
+      of the document. Terminal conditions and reward envelopes are not in there
+      for that reason: they are expressed as code, not as data, and generating
+      them would mean parsing rather than reading.
+
+* [ ] **Make deviations testable, the way validation rows already are.**
+      Every row of a validation table names a test that asserts it, and no
+      validation row has drifted. Deviations name nothing, and they have
+      drifted badly. That is not a coincidence.
+
+      Require each ⚠️ or ❌ deviation to cite a test **demonstrating the
+      limitation still exists**. Then repairing the code breaks the test, and a
+      deviation cannot outlive its own fix. Both of the worst cases would have
+      been caught automatically: the post-stall note the day the Viterna blend
+      landed, and the reactor's reward note when the sum became a mean.
+
+      Cost is one test per deviation, and there are roughly sixty across
+      twenty-one contracts, so this is a real piece of work rather than an
+      afternoon. The honest limit is worth stating too: this forces a deviation
+      to stay *true*, but nothing can force its *rationale* to stay accurate.
+      The goal is to shrink the surface the drift checker has to police, not to
+      eliminate it.
+
 * [ ] **Derive the MPC error bands rather than choosing them one at a time.**
       Every MPC objective normalises its tracking error by a per-plant band:
       `tracking_band` on the four-tank, the distillation column, the pH loop and
@@ -265,7 +347,18 @@ what is broken and recorded rather than hidden.
       `precision_floor` and the envelope both already declared -- and to check
       each plant's against it. Two rows of that comparison, the battery and the
       turbine, first need their tracked observation expressed in physical units
-      rather than normalised ones, or the ratio means nothing.
+      rather than normalised ones, or the ratio means nothing: both report power
+      in MW in the observation while their bands are in W, so the measured ratio
+      came out a million times off and was discarded. Take the error from the
+      state rather than the observation.
+
+      The measured ratios where the units did line up, band against the error
+      the PID actually holds: glass furnace 45, distillation 35, pH 13.5,
+      four-tank 10.5, reactor 1.3, cement kiln 0.1, HVAC 0.5. Both mis-scaling
+      directions are represented. The furnace's band was far too large, which
+      flattened its objective; the kiln's is fifteen times *smaller* than its
+      operating error, which saturates the surrogate instead. Only the reactor's
+      is sized to its own loop.
 
 * [ ] **Stronger model-based baselines: scenario and oracle MPC.**
       Scoped in [certainty-equivalence-study.md](certainty-equivalence-study.md),

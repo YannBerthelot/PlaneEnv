@@ -3,7 +3,6 @@ from target_gym.reactor.env import (
     BETA_TOT,
     LAMBDA_I,
     N_GROUPS,
-    N_SETPOINTS,
     ReactorParams,
     ReactorState,
     check_is_terminal,
@@ -29,5 +28,4 @@ __all__ = [
     "LAMBDA_I",
     "BETA_TOT",
     "N_GROUPS",
-    "N_SETPOINTS",
 ]

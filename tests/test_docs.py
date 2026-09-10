@@ -160,3 +160,30 @@ def test_the_colab_notebook_still_runs():
             raise AssertionError(
                 f"notebooks/quickstart.ipynb cell {i} failed: {exc}\n\n{src}"
             ) from exc
+
+
+def test_documentation_still_describes_the_code():
+    """The contracts are read *instead of* the code, so drift misinforms.
+
+    Reviewing all twenty-one environments found this to be the repository's
+    most common defect, and three of that review's own findings were wrong
+    because of it: a deviation claiming post-stall lift decays to zero when the
+    fix had long been implemented, a docstring saying sub-step rewards are
+    summed when the code takes their mean, and a deviation crediting a reward
+    change to a band the reward does not read.
+
+    ``scripts/check_doc_drift.py`` catches the four mechanical cases. The
+    judgement calls it cannot catch are exactly the ones that rot, so this is a
+    floor rather than a guarantee.
+    """
+    import subprocess
+    import sys
+
+    for script in ("scripts/generate_physics_facts.py", "scripts/check_doc_drift.py"):
+        result = subprocess.run(
+            [sys.executable, script, "--check"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, script + "\n" + result.stdout + result.stderr

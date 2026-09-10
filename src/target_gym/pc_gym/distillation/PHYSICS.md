@@ -155,3 +155,24 @@ ill-conditioned materially changes achievable performance.
 
 **⚠️ D3 — constant molar flows.** Standard for this benchmark, but it means
 energy balance effects (varying latent heats, subcooling) cannot appear.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `distillation` | 200 | 1 | 3 min | 2 in [-1, 1] | 6 | 46 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

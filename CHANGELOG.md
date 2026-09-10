@@ -200,9 +200,14 @@ than by commit.
 
 - **Running-cost terms from seven rewards**, for this release line: fuel on the
   glass furnace, the boiler drum and the cement kiln, energy on the building,
-  reboiler duty on the column, reagent on the pH loop, import cost on the
-  battery. All seven weights are zero and the tasks score setpoint tracking
-  alone. Cost is real, but its weight against tracking accuracy silently picks a
+  reboiler duty on the column, and reagent on the pH loop. All six weights are
+  zero and those tasks score setpoint tracking alone.
+
+  The battery was briefly in this list by mistake. Its `cost_weight` is not a
+  consumption cost: it gates the degradation and state-of-charge terms, which
+  are what keep that control problem well posed, and zeroing it made the
+  optimal policy follow dispatch until the pack hit a limit. Restored, and the
+  field now says what it is. Cost is real, but its weight against tracking accuracy silently picks a
   point on a Pareto front, and none of the seven had an argument behind its
   number. The glass furnace showed what that costs: a 0.1 fuel weight made a
   3.3 K standing error the optimum of what its MPC was asked to minimise, so the

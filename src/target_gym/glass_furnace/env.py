@@ -198,7 +198,7 @@ class GlassFurnaceParams(EnvParams):
     T_ambient: float = 25.0  # °C
 
     # ---- Operating / termination bounds ----
-    T_crown_min: float = 1427.0
+    T_crown_min: float = 1427.0  # °C, incomplete melting
     #: The error at which crown tracking is bad, in K. Used by the MPC's
     #: objective, in the same role as ``tracking_band`` on the four-tank, the
     #: distillation column and the pH loop. Sized from what the log-scaled
@@ -206,9 +206,7 @@ class GlassFurnaceParams(EnvParams):
     #: 0.801, 4 K scores 0.709, and a furnace held 10 K off its setpoint is one
     #: nobody would call controlled.
     tracking_band: float = 10.0
-    precision_floor: float = (
-        1.0  # K, type-B thermocouple resolution at 1600 K  # °C, incomplete melting
-    )
+    precision_floor: float = 1.0  # K, type-B thermocouple resolution at 1600 K
     T_crown_max: float = 1677.0  # °C, refractory damage
     T_glass_min: float = 900.0
     T_glass_max: float = 1727.0

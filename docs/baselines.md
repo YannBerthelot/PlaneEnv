@@ -126,6 +126,45 @@ Three implementations, chosen per environment by what its dynamics allow:
 | `GradientMPC` | 11 environments | Differentiates the JAX dynamics directly and descends the objective |
 | `SamplingMPC` | cement kiln | Cross-entropy sampling, for when gradients are unusable |
 
+
+### Why the MPC does not minimise the reward
+
+Every MPC here optimises a **quadratic surrogate** in a per-plant error band,
+not the environment's own reward. That is deliberate, standard, and measured.
+
+It is the difference between *economic* MPC, which optimises the true
+objective, and *tracking* MPC, which optimises a quadratic around the setpoint;
+quadratic stage costs are the overwhelming norm in practice. Here there are two
+independent reasons. The log-scaled reward's gradient is
+`-1/((f + e)·log1p(E/f))`, which decays like `1/e`: the pull toward the setpoint
+is weakest exactly where the controller is furthest from it. A quadratic in the
+normalised error has the same minimiser and a gradient that instead *grows*
+with the error. Measured on the wind turbine over six seeds, that difference is
+worth almost everything, 341.9 against 172.1 for the reward itself. Separately,
+for the CasADi plants a quadratic is far better conditioned than a log, whose
+curvature is unbounded at the floor.
+
+So each plant declares an error band the planner normalises by:
+`tracking_band` on the four-tank, the column, the pH loop and the glass
+furnace, `power_band` on the turbine and the battery, plus `comfort_band`,
+`lime_band`, `level_band`, `pressure_band` and `reward_band`.
+
+**These are controller constants, not reward parameters**, and it is worth
+saying so loudly because they did not always look like it. Several once carried
+comments claiming the reward reached zero, or halved, at the band. It does not:
+the rewards normalise by an operating envelope and a `precision_floor`.
+
+The failure mode is specific. Surrogate and reward agree on the *minimiser*,
+but not on trade-offs against any **second** term. The glass furnace is the
+worked example: its band was 40 K, inherited from a reward the environment had
+stopped using, and against a 0.1 fuel weight that made a 3.3 K standing error
+the optimum of what the controller was asked to minimise. It sat 6 K cold with
+fuel at minimum 80% of the time and trailed its own PID by 16% on ten seeds out
+of ten. With the running costs zeroed for this release line there is no second
+term anywhere, so no band can currently do that damage. Restoring any weight
+re-arms it, which is why the roadmap item on running cost and the one on
+deriving these bands are the same piece of work.
+
 The cement kiln uses sampling because its adjoint overflows: half its response
 to a fuel change takes a full 25-minute residence time, and differentiating
 back through that transport delay does not survive in floating point.

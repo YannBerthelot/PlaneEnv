@@ -801,6 +801,53 @@ def test_actuator_can_move_the_tracked_variable(spec):
     )
 
 
+# Environments whose terminal guard cannot fire, and why that is known rather
+# than suspected. A guard that can never trip is harmless as defence and
+# actively misleading as documentation -- it reads as a failure mode the plant
+# has, and it makes ``mpc_terminated_early`` a structural zero rather than an
+# earned one. The four-tank's PHYSICS.md already records its dead ``h_max`` in
+# this spirit; this pins the rest so none of them can silently become reachable
+# after a parameter change without somebody noticing it had not been.
+KNOWN_UNREACHABLE_TERMINALS = {
+    "first_order": (
+        "x is first-order toward K*u, which the action bounds cap at +/-2, "
+        "from a start inside +/-0.5, so |x| never approaches the +/-3 trip"
+    ),
+}
+
+
+def test_unreachable_terminals_are_still_unreachable(spec):
+    """Check 8: a guard that cannot fire must be known not to fire.
+
+    Only the listed environments are asserted unreachable. Everything else is
+    left alone: most trips here are reachable and several are the point of the
+    task.
+    """
+    reason = KNOWN_UNREACHABLE_TERMINALS.get(spec.name)
+    if reason is None:
+        pytest.skip(f"{spec.name} is not claimed unreachable")
+
+    env = spec.make_env()
+    params = spec.make_test_params()
+    space = env.action_space(params)
+    shape = space.shape or (1,)
+    low = np.broadcast_to(np.asarray(space.low, float), shape)
+    high = np.broadcast_to(np.asarray(space.high, float), shape)
+    step = jax.jit(env.step_env)
+
+    for frac in (0.0, 0.5, 1.0):
+        action = jnp.asarray(low + frac * (high - low))
+        key = jax.random.PRNGKey(0)
+        _, state = env.reset_env(key, params)
+        for _ in range(int(params.max_steps_in_episode)):
+            _, state, _, terminated, _ = step(key, state, action, params)
+            assert not bool(terminated), (
+                f"{spec.name}: terminated under a constant action, but is "
+                f"listed as unreachable because {reason}. Either the guard is "
+                "now live and the entry should go, or something moved."
+            )
+
+
 @pytest.mark.slow
 def test_plant_does_not_accelerate_without_input(spec):
     """Check 7: can the energy budget be bounded from outside?

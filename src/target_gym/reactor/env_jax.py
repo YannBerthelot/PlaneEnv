@@ -9,7 +9,6 @@ from gymnax.environments import environment, spaces
 
 from target_gym.base import canonical_reset
 from target_gym.reactor.env import (
-    N_SETPOINTS,
     ReactorParams,
     ReactorState,
     check_is_terminal,
@@ -155,15 +154,26 @@ class Reactor(environment.Environment[ReactorState, ReactorParams]):
             minval=params.target_n_range[0],
             maxval=params.target_n_range[1],
         )
-        # Legacy schedule field (kept for backward compatibility, unused by OU).
-        demand_mu = 0.5 * (params.target_n_range[0] + params.target_n_range[1])
-        target_schedule = jnp.full((N_SETPOINTS,), demand_mu)
-
-        # Precursors and xenon/iodine start at steady-state for the initial
-        # neutron density. Without this, there would be a huge transient in
-        # the first few seconds.
+        # Precursors start at steady state for the initial neutron density;
+        # without that there is a large transient in the first few seconds.
         initial_C = steady_state_precursors(initial_n, params)
-        initial_I_hat, initial_Xe_hat = steady_state_xenon(initial_n, params)
+
+        # Xenon and iodine start at the equilibrium for a *different*, recent
+        # power level, not the current one. A reactor that has been
+        # load-following is essentially never at xenon equilibrium, and starting
+        # it there made the poison a constant bias: with dXe/dt = 0 at t = 0 and
+        # a 13.2 h xenon time constant, the term the module docstring calls "the
+        # dominant control challenge" contributed nothing an operator would have
+        # to trim. Sampling the history instead makes it live from the first
+        # step. The range is deliberately narrow, so the offset is one a real
+        # unit would carry rather than an extreme.
+        key, history_key = jax.random.split(key)
+        n_recent = jax.random.uniform(
+            history_key,
+            minval=params.initial_xenon_power_range[0],
+            maxval=params.initial_xenon_power_range[1],
+        )
+        initial_I_hat, initial_Xe_hat = steady_state_xenon(n_recent, params)
 
         state = ReactorState(
             time=0,
@@ -174,9 +184,9 @@ class Reactor(environment.Environment[ReactorState, ReactorParams]):
             I_hat=jnp.asarray(initial_I_hat, dtype=jnp.float32),
             Xe_hat=jnp.asarray(initial_Xe_hat, dtype=jnp.float32),
             target_n=initial_target,
-            target_schedule=target_schedule,
             demand_key=demand_key,
             rho_ext=jnp.zeros((), dtype=jnp.float32),
+            rho_ext_cmd=jnp.asarray(0.0, dtype=jnp.float32),
         )
 
         obs = self.get_obs(state)

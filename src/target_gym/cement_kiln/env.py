@@ -124,10 +124,8 @@ class CementKilnParams(EnvParams):
     T_ambient: float = 300.0  # K
 
     # -- actuators ------------------------------------------------------------
-    fuel_min: float = 1.2
-    precision_floor: float = (
-        5e-4  # free-lime fraction, laboratory assay resolution0  # kg/s
-    )
+    fuel_min: float = 1.2  # kg/s
+    precision_floor: float = 5e-4  # free-lime fraction, laboratory assay resolution
     fuel_max: float = 2.40  # kg/s
     rpm_min: float = 2.0
     rpm_max: float = 4.5
@@ -139,12 +137,20 @@ class CementKilnParams(EnvParams):
 
     # -- task -----------------------------------------------------------------
     target_lime_range: Tuple[float, float] = (0.008, 0.018)
-    lime_band: float = 0.006  # tracking band (fractional free lime)
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    lime_band: float = 0.006  # fractional free lime
     T_bz_max: float = 1900.0  # K  ring formation / melting
     T_bz_min: float = 1620.0  # K  the kiln has gone cold: the charge stops
     #                                 clinkering and recovery takes hours,
     #                                 longer than an episode
-    T_wall_max: float = 2200.0  # K  refractory failure
+    # ``T_wall_max`` is gone. It terminated the episode 111 K above a
+    # refractory the contract says runs several hundred degrees too hot,
+    # because clinker coating is not modelled -- deviation D1 states plainly
+    # that the wall temperature "should not be read as a prediction". A live
+    # trip cannot rest on a disclaimed quantity, and it was not needed:
+    # ``T_bz_max`` already catches ring formation, which is where the kiln
+    # actually fails, and it is on the solid, which *is* validated.
     # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
     # A running cost is a real part of every one of these plants, but its
     # weight against tracking accuracy is a design decision this library has
@@ -446,9 +452,7 @@ def check_is_terminal(state: CementKilnState, params: CementKilnParams, xp=jnp):
     goes cold stops reacting and takes hours to bring back.
     """
     T_bz = xp.max(state.T_solid)
-    overheat = xp.logical_or(
-        T_bz >= params.T_bz_max, xp.max(state.T_wall) >= params.T_wall_max
-    )
+    overheat = T_bz >= params.T_bz_max
     gone_cold = T_bz <= params.T_bz_min
     terminated = xp.logical_or(overheat, gone_cold)
     truncated = state.time >= params.max_steps_in_episode

@@ -209,3 +209,24 @@ residence time to the speed input.
 
 **⚠️ D6 — 16 axial zones.** The burning zone spans only a few slices, so its
 peak temperature is resolution-limited; a finer grid shifts it modestly.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cement_kiln` | 700 | 30 | 5.8 h | 2 in [-1, 1] | 8 | 85 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

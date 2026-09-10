@@ -197,6 +197,28 @@ and it is set to a physical resolution (a barometric altimeter reads to about a
 metre) rather than to a chosen tolerance. It also keeps the reward bounded,
 since an unfloored logarithm diverges at zero error.
 
+### Observation
+
+`[x_dot, z, z_dot, theta, theta_dot, gamma, target_altitude, power, stick,
+target_speed]`.
+
+Nearly full state, and deliberately so: this is the suite's *transparent*
+aircraft, where the difficulty is the plant rather than what can be seen of it.
+An airliner does measure all of these. Airspeed, altitude and vertical speed
+come from the air-data system, pitch and pitch rate from the inertial
+reference, flight-path angle from the two together, and the aircraft knows its
+own thrust and elevator commands.
+
+Hidden: **the gusts** (`gust_x`, `gust_z`), which is the point -- turbulence is
+a disturbance to be rejected, not a signal to be read, and no aircraft measures
+the gust field it is flying into. Also hidden are **mass and fuel**, which move
+slowly and which a controller tracking altitude has no need of, and `x`, which
+nothing depends on.
+
+Compare `plane3d`, where the same aircraft becomes partially observed once the
+task is a path rather than a level, and `patrol`, where the reference itself
+must be inferred.
+
 ### Task variants and initial conditions
 
 The plant is shared; `target_pattern` selects what is commanded. `plane` holds a
@@ -264,11 +286,26 @@ beforehand. It made no difference to them: that failure is a lateral
 bank oscillation, and the Mach excursion is a symptom of the thrashing rather
 than its cause.
 
-**⚠️ Post-stall lift decays to zero.** A fully separated wing still behaves
-roughly like a flat plate (CL ≈ 2·sin α·cos α, so ~0.9 at 25°), whereas this
-model sends CL → 0. Deep-stall recovery is therefore not represented. Acceptable
-while the tasks stay inside the normal envelope; would need a Kirchhoff-style
-linear/flat-plate blend to fix.
+**✅ Post-stall — FIXED, and this note was stale long enough to mislead a
+review.** It used to read "post-stall lift decays to zero ... would need a
+Kirchhoff-style linear/flat-plate blend to fix". That blend is implemented, and
+with a better constant than the note proposed: the separated branch uses
+Viterna & Corrigan (1981), `CN_max = 1.11 + 0.018·AR`, which for this wing's
+aspect ratio of 9.48 gives 1.28, so the peak separated normal force comes from
+the wing's own geometry rather than the 2D flat plate's 2.0. Separation is
+blended on `|α|` so both branches stall, and it is applied *after* the Mach
+corrections, because separated flow is not a compressibility effect and
+Prandtl-Glauert has no business scaling it.
+
+**This is what makes the aircraft's operating envelope emerge instead of being
+imposed.** A fully separated wing here makes at most `CL ≈ 0.64`. Holding 77° of
+bank needs about 2.2, so an aircraft that asks for it is refused the lift,
+descends under separated drag approaching 1.3, and fails through the ground
+limit it already has. That is why `check_is_terminal` trips on altitude alone
+and needs no stall, load-factor or attitude bound: the aerodynamics decline the
+manoeuvre, and flying into the ground is the physical failure. Before the blend
+a departed wing produced no force at all, fell at 300 m/s and tumbled without
+damping, and nothing stopped a planner exploring there.
 
 ## 6. Validation method
 
@@ -311,3 +348,26 @@ directly. `state.m` was decorative, so nothing noticed; the moment mass became
 load-bearing it would have stepped 20 tonnes between reset and the first
 update. Fuel is a component of `initial_mass`, not an addition, and all three
 sites (2D, 3D and patrol) now say so.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `plane` | 280 | 1 | 5 min | 2 in [-1, 1] | 10 | 16 |
+| `plane_energy` | 1200 | 1 | 20 min | 2 in [-1, 1] | 10 | 16 |
+| `plane_sine` | 480 | 1 | 8 min | 2 in [-1, 1] | 10 | 16 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

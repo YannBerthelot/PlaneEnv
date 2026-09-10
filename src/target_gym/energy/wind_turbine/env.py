@@ -104,10 +104,21 @@ class WindTurbineParams(EnvParams):
 
     # ---- Operating / termination bounds ----
     overspeed_factor: float = 1.25  # trip above this multiple of rated speed
+    #: Rotor speed below which the episode ends, as a fraction of rated. Not an
+    #: arbitrary guard: as the rotor slows in above-rated wind the tip-speed
+    #: ratio ``lambda = omega R / v`` collapses, and the Cp surface falls away
+    #: at low lambda, so aerodynamic torque drops and the rotor slows further.
+    #: That is an aerodynamic stall of the rotor and it does not recover without
+    #: external drive. It also guards a singularity: ``tau_aero = P / omega``
+    #: diverges as omega approaches zero, so letting it run to a stop would buy
+    #: a numerical failure rather than a physical one.
     underspeed_factor: float = 0.40
 
     # ---- Reward shaping ----
-    power_band: float = 0.5e6  # W, error at which tracking reward reaches 0
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md. The reward's
+    # envelope is ``power_envelope`` on the next line.
+    power_band: float = 0.5e6  # W
     precision_floor: float = 1e3  # W, revenue-grade power metering resolution
     power_envelope: float = 5e6  # W, rated electrical output
     pitch_activity_weight: float = 0.02  # fatigue proxy
@@ -305,6 +316,18 @@ def compute_reward(state: WindTurbineState, params: WindTurbineParams, xp=jnp):
     power = electrical_power(state.omega, state.torque, params)
     err = xp.abs(state.target_power - power)
     tracking = log_scaled_reward(err, params.precision_floor, params.power_envelope, xp)
+    # Command minus achieved, not pitch motion. Pitch follows its command
+    # through a first-order actuator *and* a rate limit, so this quantity is
+    # large exactly when the command is running ahead of what the actuator can
+    # deliver -- it charges for *futile* commands rather than for using the
+    # actuator at all, which a controller that must pitch has to do. The
+    # incentive it creates is "stay inside the achievable envelope", which is
+    # the same thing as "anticipate rather than react", and that is what this
+    # task is about.
+    #
+    # The reactor's rod penalty now uses the same form, for the same reason:
+    # its rods are rate-limited too, and its previous ``|rho_ext|`` charged for
+    # holding the rods where the physics requires them.
     activity = xp.abs(state.pitch_cmd - state.pitch) / params.pitch_max
     return tracking * (1.0 - params.pitch_activity_weight * activity)
 

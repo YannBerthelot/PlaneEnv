@@ -124,7 +124,15 @@ class BoilerDrum(environment.Environment[BoilerDrumState, BoilerDrumParams]):
             level=jnp.asarray(level0),
             q_steam=q_steam,
             Q_fuel=jnp.asarray(Q),
-            q_feed=jnp.asarray(params.q_steam_nominal),
+            # Feedwater matched to the steam actually leaving, not to nominal.
+            # Setting it to nominal while sampling steam at +/-8 kg/s opened
+            # every episode with a mass imbalance of about 7% on a level that
+            # does not self-regulate: uncorrected, that walks the drum roughly
+            # 43 cm over the episode against a 25 cm trip. The plant now starts
+            # genuinely balanced, which is what the comment above already
+            # claimed, and the OU steam demand supplies the control problem
+            # from there.
+            q_feed=q_steam,
             target_pressure=target_pressure,
             level_ref=jnp.asarray(level_ref),
         )

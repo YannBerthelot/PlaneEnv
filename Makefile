@@ -37,6 +37,8 @@ ci-docs:  ## Generated pages are current and the site builds with no dangling li
 	uv run python scripts/generate_env_reference.py --check
 	uv run python scripts/generate_env_pages.py --check
 	uv run python scripts/stamp_env_versions.py --check
+	uv run python scripts/generate_physics_facts.py --check
+	uv run python scripts/check_doc_drift.py --check
 	uv run mkdocs build --strict
 
 # -n auto spreads the suite over every core; tests/conftest.py holds each

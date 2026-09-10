@@ -101,14 +101,14 @@ class PHParams(EnvParams):
     pK2: float = 10.25
 
     # ---- Operating / termination bounds ----
-    pH_min: float = 2.0
-    precision_floor: float = (
-        1e-2  # pH units, glass electrode resolution  # grossly acidic -- off spec
-    )
+    pH_min: float = 2.0  # grossly acidic -- off spec
+    precision_floor: float = 1e-2  # pH units, glass electrode resolution
     pH_max: float = 12.0  # grossly alkaline -- off spec
 
     # ---- Reward shaping ----
-    tracking_band: float = 1.0  # pH units at which tracking reward reaches 0
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    tracking_band: float = 1.0  # pH units
     # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
     # A running cost is a real part of every one of these plants, but its
     # weight against tracking accuracy is a design decision this library has

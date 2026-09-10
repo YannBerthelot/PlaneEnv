@@ -40,12 +40,12 @@ class FourTankParams(EnvParams):
     precision_floor: float = 1e-3  # m, level transmitter resolution (1 mm)
     h_max: float = 1.5
 
-    # Tracking band: the level error at which the tracking reward reaches zero.
-    # Previously the reward was scaled by the full tank span (h_max - h_min =
-    # 1.45 m), roughly three times the plant's entire reachable range, so a
-    # half-metre miss still scored 0.43 and the reward barely distinguished a
-    # working controller from a saturated one. 5 cm is a real miss on a plant
-    # whose setpoints live between 0.10 and 0.30 m.
+    # Error scale for the MPC's tracking term, in metres. Not read by
+    # ``compute_reward``: the reward normalises by the full span under a log,
+    # which is what fixed the flat-reward problem this was introduced for. It
+    # survives because the planner's quadratic surrogate needs a scale, and 5 cm
+    # is a real miss on a plant whose setpoints live between 0.10 and 0.30 m.
+    # See D1 in PHYSICS.md for why a band the reward ignores is worth watching.
     tracking_band: float = 0.05
 
     # Target level ranges for tanks 1 and 2.
@@ -76,7 +76,11 @@ class FourTankParams(EnvParams):
     initial_h1_range: Tuple[float, float] = (0.11, 0.19)
     initial_h2_range: Tuple[float, float] = (0.14, 0.26)
     initial_h3_range: Tuple[float, float] = (0.25, 0.45)
-    initial_h4_range: Tuple[float, float] = (0.09, 0.16)
+    # Raised from 0.09: the target box is sized to keep 50 mm of margin on h4
+    # above the 0.05 m trip, and starting at 0.09 gave only 40, so an episode
+    # could begin closer to the low-level trip than any commanded steady state
+    # ever gets.
+    initial_h4_range: Tuple[float, float] = (0.10, 0.16)
 
     delta_t: float = 1.0
     max_steps_in_episode: int = 500

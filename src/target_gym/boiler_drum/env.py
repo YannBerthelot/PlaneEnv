@@ -118,12 +118,14 @@ class BoilerDrumParams(EnvParams):
     # -- task -----------------------------------------------------------------
     target_pressure_range: Tuple[float, float] = (82.0, 88.0)
     initial_level_range: Tuple[float, float] = (-0.05, 0.05)
-    level_band: float = 0.10  # m    tracking band for the reward
-    pressure_band: float = 2.0  # bar
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    level_band: float = 0.10  # m
+    pressure_band: float = 2.0  # bar, likewise
     level_trip: float = 0.25  # m    carryover / dryout, both irrecoverable
     pressure_min: float = 65.0
     level_precision_floor: float = 1e-3  # m, drum level transmitter
-    pressure_precision_floor: float = 0.05  # bar, pressure transmitter  # bar
+    pressure_precision_floor: float = 0.05  # bar, pressure transmitter
     pressure_max: float = 105.0  # bar
     # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
     # A running cost is a real part of every one of these plants, but its

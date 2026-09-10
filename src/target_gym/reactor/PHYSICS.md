@@ -183,3 +183,24 @@ loop has a transport delay of order ten seconds.
 removes all heat immediately. A real reactor still produces ~7 % of rated power
 seconds after shutdown, decaying over hours. This makes shutdown transients in
 this model markedly more benign than the real thing.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `reactor` | 8640 | 1 | 2.4 h | 1 in [-1, 1] | 4 | 14 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

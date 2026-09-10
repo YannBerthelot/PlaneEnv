@@ -193,8 +193,16 @@ class PlanePatrolMARL:
             view = self._wingman_view(w, lead, i, state)
             err = slot_error(view)
             errs.append(err)
+            # Log-scaled, matching the single-agent reward. This was the
+            # Gaussian that environment used to carry, and it was left behind
+            # when that one migrated: with a 60 m sigma against a 1500 m
+            # terminal bound it is flat at 1e-6 across most of the reachable
+            # range, so a wingman 300 m out of position and one 800 m out score
+            # indistinguishably.
             track_terms.append(
-                jnp.exp(-0.5 * (err / params.slot_tolerance) ** 2)
+                log_scaled_reward(
+                    err, params.slot_precision_floor, params.max_slot_error
+                )
                 * heading_alignment(view, params)
             )
         track = jnp.mean(jnp.stack(track_terms))

@@ -40,6 +40,7 @@ from target_gym.plane3d.env import (
     get_obs_heading,
     wrap_angle,
 )
+from target_gym.utils import log_scaled_reward
 
 # ─── State & parameters ─────────────────────────────────
 
@@ -81,13 +82,22 @@ class PatrolParams(PlaneParams3D):
     slot_up_range: Tuple[float, float] = (-60.0, 60.0)
 
     # Reward / termination shaping.
-    slot_tolerance: float = 60.0  # sigma of the Gaussian slot reward (m)
+    #: The formation tolerance, in metres: what "in the slot" means when a
+    #: test or a report judges whether the follower held station. Not a reward
+    #: parameter -- the reward is log-scaled against ``max_slot_error`` with a
+    #: floor at ``slot_precision_floor``.
+    slot_tolerance: float = 60.0
     # Heading-alignment tolerance (rad): the follower should fly roughly
     # parallel to the lead (like a real wingman), not merely occupy the slot
     # position.  30 deg sigma nudges toward parallel flight without dominating.
     heading_tolerance: float = 0.5236
     min_separation: float = 25.0  # collision distance (m) -> terminal
     max_slot_error: float = 1500.0  # follower lost the formation (m) -> terminal
+    #: Slot error below which the reward stops paying, in metres. Relative
+    #: position between two aircraft comes from differencing GPS fixes, so a
+    #: few metres is the honest resolution; asking for better is measuring
+    #: noise.
+    slot_precision_floor: float = 3.0
 
     # Lead behaviour.  Turn rate is sampled in [-r, r] rad/step; 0 => straight
     # and level.  At delta_t = 1 s, 0.003 rad/step ~ 0.17 deg/s ~ a very gentle
@@ -234,22 +244,37 @@ def heading_alignment(state: PatrolState, params: PatrolParams, xp=jnp):
 
 
 def compute_reward_patrol(state: PatrolState, params: PatrolParams, xp=jnp):
-    """Slot-position Gaussian * heading-alignment, with a hard terminal penalty.
+    """Slot-position tracking times heading alignment.
 
-    Mirrors the shaping style of the path-following 3D tasks (a Gaussian in the
-    tracking error) and the crash-penalty convention of the whole suite
-    (``-max_steps_in_episode`` on an irrecoverable state).  The multiplicative
-    heading factor makes the target "fly the slot *parallel* to the lead".
+    The multiplicative heading factor makes the target "fly the slot *parallel*
+    to the lead" rather than merely occupy the point.
+
+    Tracking is log-scaled, as everywhere else in the suite. This was the last
+    environment still using a Gaussian, ``exp(-0.5 (e/sigma)^2)``, and with a
+    60 m sigma against a 1500 m terminal bound -- twenty-five sigma -- it was
+    flat at 1.4e-6 from roughly 250 m outward. The whole reachable range beyond
+    a couple of slot widths carried no gradient at all, which is the defect
+    ``docs/reward-shaping.md`` records for every other plant that has since been
+    migrated.
+
+    That flatness is also a candidate explanation for the tuning pathology in
+    D1 of PHYSICS.md: an objective that is a flat floor with a spike near zero
+    is one whose landscape *would* look chaotic under small gain perturbations.
+    Migrating it separates reward shape from guidance law as the cause, which
+    the deviation could not do while both were suspect.
+
+    No explicit crash penalty. Termination already costs the agent every step
+    it would otherwise have earned, and since the reward is non-negative
+    everywhere that is strictly worse than flying on. A large negative spike
+    bought nothing the forgone reward did not, and left this family on a
+    different contract from the twelve process plants, which have always relied
+    on forgone reward alone.
     """
     err = slot_error(state)
-    track_r = xp.exp(-0.5 * (err / params.slot_tolerance) ** 2)
+    track_r = log_scaled_reward(
+        err, params.slot_precision_floor, params.max_slot_error, xp
+    )
     align_r = heading_alignment(state, params, xp)
-    # No explicit crash penalty. Termination already costs the agent every
-    # step it would otherwise have earned, and since the reward is
-    # non-negative everywhere that is strictly worse than flying on. A
-    # large negative spike bought nothing the forgone reward did not, and
-    # left this family on a different contract from the twelve process
-    # plants, which have always relied on forgone reward alone.
     return track_r * align_r
 
 

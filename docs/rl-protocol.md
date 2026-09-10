@@ -253,6 +253,17 @@ what the task is. It is recorded here and left open rather than folded into this
 change. Until then, results on the reactor should be read as measuring flux
 tracking, not xenon management.
 
+**The distillation column has a milder version of the same gap.** Its benchmark
+episode is 200 steps against a 194 min dominant mode, so the slowest dynamics
+get through about 63% of one response and never settle. By the actuator-to-output
+measure this section uses it is 25 tau, well clear of the floor, and the
+registry records the length as a deliberate cost compromise: 41 states with 16
+integration substeps make it the slowest environment per step in the suite. But
+the difficulty the column advertises is the hidden interior profile acting as
+memory, and one time constant exercises that only partly. Read its results as
+product-composition tracking under an ill-conditioned plant, which they measure
+well, rather than as profile management.
+
 ## 7. Hyperparameters, and why they must be tuned
 
 **The PID and the MPC are tuned per environment. If the learned policy is not,
@@ -400,18 +411,23 @@ indistinguishable from tabula rasa.
 
 ## 11. Controls
 
-Every environment's table carries four reference rows, so a result is bracketed
+Every environment's table carries two reference rows, so a result is bracketed
 rather than floating:
 
 | row | what it establishes |
 | --- | --- |
-| random policy | the floor |
-| best constant action | the bar a controller must clear to be doing anything — already asserted for the PID in the conformance suite |
 | **PID** | **the peer** |
 | MPC | the model-based, full-state upper bound |
 
-A learned policy that fails to beat the best constant action has not learned
-control, whatever its return looks like.
+These are what `data/baseline_returns.json` records, ten episode seeds each, and
+they are what a learned policy is compared against.
+
+A random-policy floor and a best-constant-action bar were specified here as well
+and are not recorded. The constant-action bar is not lost: the conformance suite
+already asserts that every PID beats the best constant action, which is the
+claim that bar existed to support, and `runners.figure_comparison` draws it when
+a figure needs it. A random floor on a setpoint-tracking task is a number
+everyone can predict and nobody reads.
 
 ## 12. How to read the result
 

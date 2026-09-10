@@ -9,6 +9,7 @@ from gymnax.environments import environment, spaces
 
 from target_gym.base import canonical_reset
 from target_gym.glass_furnace.env import (
+    FUEL_DEAD_TIME_STEPS,
     N_REGEN_NODES,
     N_SETPOINTS,
     GlassFurnaceParams,
@@ -24,6 +25,11 @@ from target_gym.utils import save_video
 
 
 class GlassFurnace(environment.Environment[GlassFurnaceState, GlassFurnaceParams]):
+    """Regenerative glass furnace; six of nine states are hidden.
+
+    Action (1,): [fuel rate], raw in [-1, 1] -> [fuel_min, fuel_max] kg/s
+    """
+
     render_furnace = classmethod(_render)
     screen_width = 700
     screen_height = 900
@@ -100,18 +106,38 @@ class GlassFurnace(environment.Environment[GlassFurnaceState, GlassFurnaceParams
 
         key, schedule_key, crown_key = jax.random.split(key, 3)
 
-        initial_T_crown = jax.random.uniform(
-            crown_key,
-            minval=params.initial_T_crown_range[0],
-            maxval=params.initial_T_crown_range[1],
+        # A trim walk, not independent draws: the first slot is the level the
+        # furnace is already being held at, and every later slot is the
+        # previous one plus a small increment, clipped to the operating band.
+        start_key, trim_key = jax.random.split(schedule_key)
+        start = jax.random.uniform(
+            start_key,
+            minval=params.target_T_crown_start_range[0],
+            maxval=params.target_T_crown_start_range[1],
         )
-        target_schedule = jax.random.uniform(
-            schedule_key,
+        trims = jax.random.uniform(
+            trim_key,
             shape=(N_SETPOINTS,),
-            minval=params.target_T_crown_range[0],
-            maxval=params.target_T_crown_range[1],
+            minval=-params.target_T_crown_trim,
+            maxval=params.target_T_crown_trim,
+        )
+        target_schedule = jnp.clip(
+            start + jnp.cumsum(trims.at[0].set(0.0)),
+            params.target_T_crown_range[0],
+            params.target_T_crown_range[1],
         )
         initial_target = get_target_from_schedule(target_schedule, 0, params)
+        # Near the level it is being held at, not somewhere else in the band.
+        initial_T_crown = jnp.clip(
+            initial_target
+            + jax.random.uniform(
+                crown_key,
+                minval=-params.initial_T_crown_offset,
+                maxval=params.initial_T_crown_offset,
+            ),
+            params.initial_T_crown_range[0],
+            params.initial_T_crown_range[1],
+        )
 
         nominal_fuel = 0.5 * (params.fuel_min + params.fuel_max)
         regen_profile = jnp.linspace(
@@ -133,6 +159,11 @@ class GlassFurnace(environment.Environment[GlassFurnaceState, GlassFurnaceParams
             target_T_crown=initial_target,
             target_schedule=target_schedule,
             m_pull_disturbance=jnp.zeros(()),
+            # The instrument starts settled on the plant, as it would be on a
+            # furnace that has been running, and the fuel pipeline starts full
+            # at the nominal flow rather than empty.
+            T_crown_meas=initial_T_crown,
+            fuel_pipeline=jnp.full((FUEL_DEAD_TIME_STEPS,), nominal_fuel),
             fuel_flow=nominal_fuel,
             T_air_preheat=params.initial_T_regen_hot,
             T_stack=params.initial_T_regen_cold,

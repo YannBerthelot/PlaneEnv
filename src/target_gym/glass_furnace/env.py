@@ -76,6 +76,20 @@ N_SETPOINTS = 5
 # memory: a drifting operating point rather than white noise.
 M_PULL_AR_RHO = 0.99
 
+#: Steps of pure transport delay between commanding a fuel flow and that heat
+#: reaching the crown. At 30 s a step this is 60 s, covering the gas train, the
+#: combustion-air adjustment that follows it and flame development.
+#:
+#: Dead time is what makes thermal control hard, and this model had none: the
+#: valve reached the flame within the step and the crown thermocouple read the
+#: true state instantly. Inertia is not the same thing. A first-order plant with
+#: no dead time has no bandwidth limit, so a PID can be tuned arbitrarily tight
+#: against it, and one duly held the crown to 0.078 K against a 10 K open-loop
+#: drift -- roughly thirty times better than a real furnace is held. Dead time
+#: is also the specific thing an MPC handles better than a PID, by predicting
+#: through it, so its absence removed the reason to have both baselines.
+FUEL_DEAD_TIME_STEPS = 2
+
 
 @struct.dataclass
 class GlassFurnaceParams(EnvParams):
@@ -91,8 +105,12 @@ class GlassFurnaceParams(EnvParams):
     # of bounds and leave the controller with almost no usable resolution.
     # raw=0 -> 0.59 kg/s holds ~1586 C at ~5.1 GJ/tonne; both extremes remain
     # genuinely unsurvivable, so the range still spans real failure modes.
-    fuel_min: float = 0.50  # kg/s (under-fires: crown cools past the limit)
-    fuel_max: float = 0.68  # kg/s (over-fires: crown exceeds the limit)
+    # Raised 2.6% when the reversal changeover started interrupting firing.
+    # The burners have to deliver the same time-averaged heat despite losing
+    # 40 s in every 1500 s, which is what real burners are sized to do; without
+    # it, mid throttle settled at 1527 C, below the calibrated operating band.
+    fuel_min: float = 0.513  # kg/s (under-fires: crown cools past the limit)
+    fuel_max: float = 0.698  # kg/s (over-fires: crown exceeds the limit)
     # Fraction of combustion heat released as radiation from the flame rather
     # than carried as gas enthalpy.
     flame_rad_fraction: float = 0.55
@@ -102,6 +120,39 @@ class GlassFurnaceParams(EnvParams):
     # Per-node effectiveness; N_REGEN_NODES of them in series per chamber.
     eps_regen_node: float = 0.80
     reversal_period: float = 1500.0  # s (25 min) -- typical float furnace
+
+    #: Firing interruption at each reversal. The burners are shut off while the
+    #: reversing valves change over and the other port lights, which on a real
+    #: furnace takes tens of seconds and shows as a crown temperature dip every
+    #: 25 min. The changeover here used to be instantaneous and lossless, which
+    #: deviation D2 in PHYSICS.md recorded: the model was missing the one
+    #: periodic upset the plant actually has.
+    #:
+    #: Not conserved, unlike batch charging. The heat is genuinely not released
+    #: during the changeover, so mean firing falls by the interruption fraction
+    #: and the controller has to make it up -- which is what happens.
+    reversal_dead_time: float = 40.0  # s of interrupted firing per reversal
+    #: Firing during the changeover, as a fraction of commanded. Not zero:
+    #: pilots stay lit, and a completely dead combustion space makes the flame
+    #: balance singular for no physical gain.
+    reversal_firing_floor: float = 0.05
+
+    #: Crown thermocouple time constant, s. The element sits in a refractory
+    #: sheath in the crown, so it reports a filtered version of the gas-side
+    #: temperature rather than the temperature itself. Only the observation is
+    #: filtered; the reward scores the true crown temperature, because what the
+    #: glass sees is what matters and the instrument is the controller's problem.
+    tau_thermocouple: float = 120.0
+
+    #: Batch charging. The doser is a reciprocating pusher on a cycle, not a
+    #: continuous stream: it fires for ``charge_duty`` of each ``charge_period``
+    #: and is idle the rest. The mean charge rate is unchanged, so the steady
+    #: state is exactly as before, but the load now has content at the charging
+    #: frequency instead of only the slow drift of the pull disturbance -- and a
+    #: slow smooth load is the one thing integral action cancels perfectly.
+    charge_period: float = 300.0  # s, one charger cycle
+    charge_duty: float = 0.30  # fraction of the cycle the doser is feeding
+    charge_mass_jitter: float = 0.15  # +/- fraction, dose to dose
     U_regen: float = 0.30  # W/(m^2.K) casing loss
     A_regen: float = 300.0  # m^2 per chamber
 
@@ -148,6 +199,13 @@ class GlassFurnaceParams(EnvParams):
 
     # ---- Operating / termination bounds ----
     T_crown_min: float = 1427.0
+    #: The error at which crown tracking is bad, in K. Used by the MPC's
+    #: objective, in the same role as ``tracking_band`` on the four-tank, the
+    #: distillation column and the pH loop. Sized from what the log-scaled
+    #: reward actually discriminates over here: 1 K scores 0.875, 2 K scores
+    #: 0.801, 4 K scores 0.709, and a furnace held 10 K off its setpoint is one
+    #: nobody would call controlled.
+    tracking_band: float = 10.0
     precision_floor: float = (
         1.0  # K, type-B thermocouple resolution at 1600 K  # °C, incomplete melting
     )
@@ -156,12 +214,17 @@ class GlassFurnaceParams(EnvParams):
     T_glass_max: float = 1727.0
 
     # ---- Reward shaping ----
-    fuel_cost_weight: float = 0.1
-    # Tracking error is normalised by this, not by the full operating span.
-    # Against the 250 C span a 20 C miss still scored 0.85, so the reward
-    # barely distinguished good control from bad within the reachable band.
-    tracking_scale: float = 40.0
-
+    # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
+    # A running cost is a real part of every one of these plants, but its
+    # weight against tracking accuracy is a design decision this library has
+    # not earned yet, and an arbitrary one turns a tracking benchmark into a
+    # multi-objective problem whose Pareto point nobody chose. The glass
+    # furnace showed the cost of getting it wrong: its MPC sat 6 K cold with
+    # fuel at minimum 80% of the time, because a 0.1 fuel weight against a
+    # quadratic tracking surrogate made that the optimum of the objective it
+    # was given. The field and the term stay, so a weight can be restored
+    # once there is a defensible way to set it. See docs/roadmap.md.
+    fuel_cost_weight: float = 0.0  # was 0.1
     # ---- Initial / target ranges ----
     # Operationally realistic setpoint band. A float furnace is trimmed by
     # +/-10-20 C around nominal; a 150 C step means re-heating the entire glass
@@ -172,7 +235,28 @@ class GlassFurnaceParams(EnvParams):
     # seed with a 146 C swing scored 734 with 37 C -- a 6x spread from sampling
     # alone.
     target_T_crown_range: Tuple[float, float] = (1565.0, 1610.0)
+    #: How large a single trim may be. The schedule used to be five independent
+    #: uniform draws from the band above, which is not how a furnace is
+    #: operated: five independent draws from a 45 C band span about 30 C on
+    #: average and can step 40 C between consecutive slots, while the comment
+    #: on that band already says a float furnace is trimmed by 10-20 C around
+    #: nominal. An operator trims from where the furnace is, in small
+    #: increments, so the schedule is now a bounded walk and this is the
+    #: largest step it may take.
+    target_T_crown_trim: float = 6.0
+    #: Where the walk starts, as a band about the middle of the operating
+    #: range. Narrower than the full band, because the first setpoint is the
+    #: level the furnace is already being held at, not an arbitrary one.
+    target_T_crown_start_range: Tuple[float, float] = (1580.0, 1595.0)
     initial_T_crown_range: Tuple[float, float] = (1572.0, 1602.0)
+    #: How far off its first setpoint the furnace may start. Drawn
+    #: independently of the schedule, the crown began a median 7 K and up
+    #: to 18 K away from the level it was being held at, which is not a
+    #: state a running furnace is found in: it takes days to reach thermal
+    #: equilibrium and is then held within a few degrees. A small offset
+    #: still leaves the first slot something to correct.
+    #: ``initial_T_crown_range`` bounds the result.
+    initial_T_crown_offset: float = 4.0
     # Reset places the furnace on a *consistent operating point* rather than an
     # arbitrary state. Offsets are measured from the settled steady state at
     # nominal firing (crown 1587 C): a real furnace takes days to reach thermal
@@ -203,6 +287,13 @@ class GlassFurnaceState(EnvState):
     target_T_crown: float
     target_schedule: jnp.ndarray
     m_pull_disturbance: float
+
+    #: What the crown thermocouple reads, lagging ``T_crown`` by
+    #: ``tau_thermocouple``. This is what ``get_obs`` reports.
+    T_crown_meas: float
+    #: Fuel flows commanded but not yet burning, oldest first. The applied flow
+    #: is ``fuel_pipeline[0]``; a new command enters at the end.
+    fuel_pipeline: jnp.ndarray
 
     # Diagnostics for rendering / observation
     fuel_flow: float
@@ -326,7 +417,13 @@ def solve_T_gas(T_gas_guess, T_crown, T_melt, T_work, T_air, m_fuel, melt_open, 
 
 
 def compute_velocity(
-    position, action, m_pull, phase, T_gas, params: GlassFurnaceParams
+    position,
+    action,
+    m_pull,
+    phase,
+    T_gas,
+    params: GlassFurnaceParams,
+    position_time: float = 0.0,
 ):
     """Right-hand side of the coupled ODE system.
 
@@ -389,7 +486,7 @@ def compute_velocity(
     )
     Q_to_batch = jnp.maximum(Q_to_batch, 0.0)
     melt_rate = Q_to_batch / p.dH_fusion
-    charge_rate = m_pull / p.batch_yield
+    charge_rate = charge_rate_now(m_pull, position_time, p)
     dm_batch = charge_rate - melt_rate
 
     cp_melt = glass_c_p(T_melt, p)
@@ -453,6 +550,67 @@ def regenerator_diagnostics(positions, T_gas, m_fuel, phase, params):
     )
 
 
+def firing_fraction(time, params: GlassFurnaceParams, xp=jnp):
+    """Fraction of commanded firing actually released over this step.
+
+    One at any time away from a reversal, ``reversal_firing_floor`` while the
+    valves change over. Averaged over the step for the same reason
+    :func:`charge_rate_now` is: the changeover is 40 s against a 30 s step, so
+    an instantaneous gate sampled once a step would land inside or outside it
+    depending on nothing physical.
+    """
+    period = xp.maximum(params.reversal_period, 1e-6)
+    dead = xp.clip(params.reversal_dead_time, 0.0, period)
+    t = xp.asarray(time, dtype=jnp.float32) * params.delta_t
+    dp = xp.minimum(params.delta_t, period)
+    p0 = xp.mod(t, period)
+
+    # The changeover sits at the *end* of each half-cycle, just before the phase
+    # flips, so a reset at t = 0 starts in a firing period rather than in the
+    # middle of a valve changeover.
+    def _overlap(lo, hi, a, b):
+        return xp.maximum(xp.minimum(hi, b) - xp.maximum(lo, a), 0.0)
+
+    off = _overlap(p0, p0 + dp, period - dead, period) + _overlap(
+        p0, p0 + dp, 2.0 * period - dead, 2.0 * period
+    )
+    frac_off = off / dp
+    return 1.0 - frac_off * (1.0 - params.reversal_firing_floor)
+
+
+def charge_rate_now(m_pull, time, params: GlassFurnaceParams, xp=jnp):
+    """Batch mass entering the furnace over this step, kg/s.
+
+    The doser is a reciprocating pusher: it fires for ``charge_duty`` of each
+    ``charge_period`` and is idle for the rest. What is returned is the rate
+    *averaged over the step*, not the instantaneous rate, which matters because
+    the integrator evaluates this once per step at a fixed time: sampling an
+    instantaneous gate at ten points a cycle loses whichever pulses fall between
+    samples, and a first attempt starved the furnace of a third of its batch.
+    Averaging over the step conserves the mass exactly, whatever ``delta_t`` is.
+
+    The dose mass varies cycle to cycle by ``charge_mass_jitter``, deterministic
+    in the cycle index so the disturbance stays a pure function of time, as
+    every disturbance in this suite is.
+    """
+    period = xp.maximum(params.charge_period, 1e-6)
+    duty = xp.clip(params.charge_duty, 1e-3, 1.0)
+    t = xp.asarray(time, dtype=jnp.float32) * params.delta_t
+    dp = xp.minimum(params.delta_t / period, 1.0)
+    p0 = xp.mod(t / period, 1.0)
+
+    # Fraction of [p0, p0 + dp) that lies inside [0, duty), on the circle.
+    def _overlap(lo, hi, a, b):
+        return xp.maximum(xp.minimum(hi, b) - xp.maximum(lo, a), 0.0)
+
+    on = _overlap(p0, p0 + dp, 0.0, duty) + _overlap(p0, p0 + dp, 1.0, 1.0 + duty)
+    frac = on / dp
+
+    cycle = xp.floor(t / period)
+    jitter = 1.0 + params.charge_mass_jitter * xp.sin(12.9898 * cycle + 78.233)
+    return (m_pull / params.batch_yield) * jitter * frac / duty
+
+
 @partial(jax.jit, static_argnames=["integration_method"])
 def compute_next_state(
     fuel_raw: float,
@@ -462,9 +620,13 @@ def compute_next_state(
     integration_method: str = "rk4_2",
 ):
     """``fuel_raw`` in [-1, 1] maps to [fuel_min, fuel_max] kg/s."""
-    m_fuel = convert_raw_action_to_range(
+    m_fuel_cmd = convert_raw_action_to_range(
         fuel_raw, min_action=params.fuel_min, max_action=params.fuel_max
     )
+    # Transport delay: what burns now was commanded FUEL_DEAD_TIME_STEPS ago,
+    # and the reversal changeover interrupts whatever that was.
+    m_fuel = state.fuel_pipeline[0] * firing_fraction(state.time, params)
+    new_pipeline = jnp.concatenate([state.fuel_pipeline[1:], jnp.array([m_fuel_cmd])])
 
     # AR(1) pull-rate disturbance. The innovation is drawn from a key folded
     # with ``state.time`` so a caller passing a constant key (as every rollout
@@ -508,6 +670,7 @@ def compute_next_state(
         phase=phase,
         T_gas=T_gas,
         params=params,
+        position_time=state.time,
     )
     new_positions, _ = integrate_dynamics(
         positions=positions,
@@ -515,6 +678,12 @@ def compute_next_state(
         compute_velocity=_compute_velocity,
         method=integration_method,
     )
+
+    # Crown thermocouple: a first-order lag on the true crown temperature,
+    # integrated exactly over the step rather than by Euler, so the reading does
+    # not depend on delta_t dividing tau.
+    alpha = 1.0 - jnp.exp(-params.delta_t / jnp.maximum(params.tau_thermocouple, 1e-6))
+    new_T_meas = state.T_crown_meas + alpha * (new_positions[0] - state.T_crown_meas)
 
     new_time = state.time + 1
     new_target = get_target_from_schedule(state.target_schedule, new_time, params)
@@ -533,6 +702,8 @@ def compute_next_state(
             T_rB=new_positions[4 + N_REGEN_NODES : 4 + 2 * N_REGEN_NODES],
             target_T_crown=new_target,
             m_pull_disturbance=new_disturbance,
+            T_crown_meas=new_T_meas,
+            fuel_pipeline=new_pipeline,
             fuel_flow=m_fuel,
             T_air_preheat=T_air_new,
             T_stack=T_stack_new,
@@ -551,17 +722,22 @@ def compute_next_state(
 def get_obs(state: GlassFurnaceState, params: GlassFurnaceParams):
     """Partially observable: only plant instrumentation is visible.
 
-    ``[T_crown, T_air_preheat, fuel_pct, reversal_phase, target_T_crown]``
+    ``[T_crown_meas, T_air_preheat, fuel_pct, reversal_phase, target_T_crown]``
 
     A real furnace has a crown thermocouple and a regenerator/air-preheat
     thermocouple, and the operator knows the reversal state. Glass
     temperatures, checker node temperatures, the batch blanket mass and the
-    pull-rate disturbance are all hidden -- 6 of 9 dynamic states.
+    pull-rate disturbance are all hidden.
+
+    The crown reading is the *instrument*, ``T_crown_meas``, which lags the true
+    crown temperature by ``tau_thermocouple``. The reward scores the true one.
+    A controller that assumes its thermocouple reads the plant is making the
+    mistake the instrument exists to punish.
     """
     fuel_pct = 100.0 * state.fuel_flow / params.fuel_max
     return jnp.array(
         [
-            state.T_crown,
+            state.T_crown_meas,
             state.T_air_preheat,
             fuel_pct,
             reversal_phase(state.time, params),

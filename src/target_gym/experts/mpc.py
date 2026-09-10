@@ -164,9 +164,64 @@ class GradientMPC:
             total = total + jnp.sum(tail_rewards)
         return total
 
+    # Iterates are held this far inside the action bounds, as a fraction of the
+    # half-range. See ``_optimize`` for why sitting exactly on a bound is fatal.
+    _BOUND_MARGIN = 1e-3
+
     def _optimize(self, actions_init: jnp.ndarray, state) -> jnp.ndarray:
+        """Projected gradient descent, kept strictly inside the action bounds.
+
+        The margin is the whole point, and it is not cosmetic. These plants
+        saturate: an engine cannot produce less than zero thrust, a valve
+        cannot open past fully open. Saturation is written with ``clip`` or
+        ``maximum``, and at exactly the kink those hand back a derivative of
+        zero, which is a valid subgradient and the wrong one for an optimiser.
+        Projecting onto the closed interval parks an action precisely on the
+        bound whenever a step overshoots, and the bound is then *absorbing*:
+        the derivative there is exactly zero, so gradient descent can never
+        move that action again, however it is scaled or preconditioned.
+
+        Measured on ``plane_steps`` seed 2, at the plan where the aircraft
+        gives up and glides into the ground with the setpoint 2000 m above it::
+
+            thrust  autodiff d(obj)/d(thrust)   finite difference   objective
+            -1.00           0.0000                   +2.998           23.989
+            -0.99          +2.9998                   +3.003           24.019
+            -0.95          +3.0266                   +3.030           24.140
+            -0.50          +3.5376                   +3.545           25.597
+
+        The derivative is right everywhere except on the bound, where the true
+        one-sided slope is +3.0 and autodiff returns 0. Thrust sat at exactly
+        -1.000 for 800 steps while the elevator went on being optimised
+        normally, which is why the controller looked alive the whole time: a
+        planner that has stopped searching still emits finite, in-bounds
+        actions. Holding the iterates 1e-3 inside the bounds takes the episode
+        from terminating at t=1732 to flying all 2400 steps, and the return
+        from 1013.6 to 2109.9 against the PID's 1717.6.
+
+        This is the interior-point principle in miniature, and it is the reason
+        real NLP solvers keep their iterates off the bounds. Two alternatives
+        were measured and are worse. Normalising the gradient per actuator
+        rather than over the whole sequence crashes earlier, at t=971, because
+        it lets a noisy actuator take a full-size step every iteration. A
+        finite-difference line search over a constant offset per actuator does
+        work, since it never consults the derivative, but it scores below this
+        on both seeds tried and costs ``action_dim * 7`` extra rollouts a step.
+
+        Twelve of the twenty environments with an MPC use this optimiser. The
+        four plants among them (battery, boiler drum, distillation, wind
+        turbine) were re-recorded after the change and moved by under half a
+        point of return, distillation not at all, so the defect was latent for
+        them and real only for the aircraft.
+
+        The NaN scrub below is a second instance of the same family, and is
+        left as it is: this project has a documented, unlocalised reverse-mode
+        NaN in the aircraft dynamics (see ``NAN_TUNERS`` in
+        ``tests/experts/test_pid_tuning.py``).
+        """
         cost_grad = jax.grad(lambda a: -self._rollout(a, state))
-        lb, ub, lr = self.action_lb, self.action_ub, self.lr
+        margin = self._BOUND_MARGIN * 0.5 * (self.action_ub - self.action_lb)
+        lb, ub, lr = self.action_lb + margin, self.action_ub - margin, self.lr
 
         def body(_, actions):
             g = cost_grad(actions)
@@ -178,7 +233,7 @@ class GradientMPC:
             g = jnp.where(g_norm > 1.0, g / g_norm, g)
             return jnp.clip(actions - lr * g, lb, ub)
 
-        return jax.lax.fori_loop(0, self.n_iter, body, actions_init)
+        return jax.lax.fori_loop(0, self.n_iter, body, jnp.clip(actions_init, lb, ub))
 
     def step(self, _obs, state):
         """Return next action. ``_obs`` is ignored (kept for API symmetry)."""
@@ -522,6 +577,24 @@ _FURNACE_BIAS_LIMIT = 40.0
 _FURNACE_BIAS_RESET = True
 
 
+#: Checker nodes per chamber in the *controller's* regenerator model. The plant
+#: carries four; the controller carries two, and ``_extract_x0`` averages the
+#: plant's nodes down in pairs.
+#:
+#: This is the one knob that decides what the furnace baseline costs to record.
+#: The regenerator is two thirds of the controller's state vector, and IPOPT's
+#: cost grows superlinearly in problem size: at the plant's four nodes the NLP
+#: has 3168 variables and a bad seed ran 5.5 s per step, which is hours per
+#: episode against a plant that steps in 92 microseconds.
+#:
+#: Two nodes rather than one averaged stack. The single stack was what this
+#: model carried before, and it left a 2-6 K standing offset because everything
+#: downstream of the checker temperatures is nonlinear in them; two nodes keep
+#: the hot/cold split that sets air preheat, which is where that error came
+#: from, at half the states.
+_FURNACE_MPC_REGEN_NODES = 2
+
+
 class GlassFurnaceCasadiMPC(CasadiMPC):
     """
     CasADi MPC for the regenerative glass furnace.
@@ -553,7 +626,15 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
 
     def _build_mpc(self):
         p = self.params
-        from target_gym.glass_furnace.env import N_SETPOINTS
+        from target_gym.glass_furnace.env import (
+            FUEL_DEAD_TIME_STEPS,
+            N_SETPOINTS,
+            firing_fraction,
+        )
+
+        if not hasattr(self, "_pipeline"):
+            nominal = 0.5 * (p.fuel_min + p.fuel_max)
+            self._pipeline = np.full(FUEL_DEAD_TIME_STEPS, nominal)
 
         model = do_mpc.model.Model("continuous")
         SB = 5.670374419e-8
@@ -576,16 +657,30 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         # this MPC 16% behind its own PID.
         from target_gym.glass_furnace.env import N_REGEN_NODES
 
-        T_rA = [model.set_variable("_x", f"T_rA{i}") for i in range(N_REGEN_NODES)]
-        T_rB = [model.set_variable("_x", f"T_rB{i}") for i in range(N_REGEN_NODES)]
+        n_regen = _FURNACE_MPC_REGEN_NODES
+        T_rA = [model.set_variable("_x", f"T_rA{i}") for i in range(n_regen)]
+        T_rB = [model.set_variable("_x", f"T_rB{i}") for i in range(n_regen)]
         T_gas = model.set_variable("_z", "T_gas")  # algebraic: quasi-steady flame
         u_raw = model.set_variable("_u", "u_raw")
         model.set_variable("_tvp", "target_T_crown")
+        # Firing actually released, as a fraction of commanded: 1 away from a
+        # reversal, near zero while the valves change over. Deterministic in
+        # time and therefore known to the controller, which is the point of
+        # modelling it -- the dip is a periodic upset a predictive controller
+        # can plan through and a PID can only react to.
+        firing = model.set_variable("_tvp", "firing")
+        # Fuel already in the pipeline. The plant applies what was commanded
+        # FUEL_DEAD_TIME_STEPS ago, so the first intervals of any plan are
+        # already decided and nothing the optimiser does can change them.
+        # ``commit`` is 1 over those intervals and 0 after.
+        u_committed = model.set_variable("_tvp", "u_committed")
+        commit = model.set_variable("_tvp", "commit")
         # The reversal is a deterministic function of time, so the oracle knows
         # it exactly rather than averaging it away. 0 -> A preheats air.
         a_is_air = model.set_variable("_tvp", "a_is_air")
 
-        m_fuel = p.fuel_min + 0.5 * (u_raw + 1.0) * (p.fuel_max - p.fuel_min)
+        m_fuel_free = p.fuel_min + 0.5 * (u_raw + 1.0) * (p.fuel_max - p.fuel_min)
+        m_fuel = firing * (commit * u_committed + (1.0 - commit) * m_fuel_free)
         m_air = p.AFR * (1.0 + p.excess_air) * m_fuel
         m_gas = m_fuel + m_air
 
@@ -621,7 +716,10 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         QA = [a_is_air * qa + (1.0 - a_is_air) * qe for qa, qe in zip(qA_air, qA_exh)]
         QB = [(1.0 - a_is_air) * qb + a_is_air * qe for qb, qe in zip(qB_air, qB_exh)]
         T_air = a_is_air * TA_air_out + (1.0 - a_is_air) * TB_air_out
-        UA_node = p.U_regen * p.A_regen / N_REGEN_NODES
+        UA_node = p.U_regen * p.A_regen / n_regen
+        # The checker stack's total heat capacity is fixed by the plant; the
+        # controller just divides it into fewer, larger nodes.
+        C_regen_node = p.C_regen_node * (N_REGEN_NODES / n_regen)
 
         coverage = m_batch / p.m_batch_full
         melt_open = 1.0 - p.batch_shield * coverage
@@ -704,14 +802,14 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
             / (p.C_work * cp_work / p.c_p_glass_a),
         )
         model.set_rhs("m_batch", p.m_pull / p.batch_yield - melt_rate)
-        for i in range(N_REGEN_NODES):
+        for i in range(n_regen):
             model.set_rhs(
                 f"T_rA{i}",
-                (QA[i] - UA_node * (T_rA[i] - p.T_ambient)) / p.C_regen_node,
+                (QA[i] - UA_node * (T_rA[i] - p.T_ambient)) / C_regen_node,
             )
             model.set_rhs(
                 f"T_rB{i}",
-                (QB[i] - UA_node * (T_rB[i] - p.T_ambient)) / p.C_regen_node,
+                (QB[i] - UA_node * (T_rB[i] - p.T_ambient)) / C_regen_node,
             )
         model.setup()
 
@@ -731,17 +829,25 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         # Share the minimiser of env.compute_reward, not its shape.
         #
         # This previously normalised the error by the crown's whole 250 K
-        # envelope while the environment scores it against ``tracking_scale``,
-        # 40 K -- so a 40 K error, which the environment scores as zero, entered
-        # the objective at 0.71, six times flatter than the reward being graded.
-        # Against an unchanged fuel penalty the controller duly sold tracking for
-        # fuel, and lost to the PID on 7 of 10 seeds.
+        # envelope, six times flatter than the band the reward discriminates
+        # over. Against an unchanged fuel penalty the controller duly sold
+        # tracking for fuel, and lost to the PID on 7 of 10 seeds.
         #
         # The old form was also non-monotonic: ``((scale - err)/scale)**2`` turns
         # back upward past ``err = scale``, so beyond twice it the objective
         # preferred *more* error. A plain squared normalised error is monotone,
         # smooth, and minimised in the same place as the reward.
-        scale = float(p.tracking_scale)
+        #
+        # ``tracking_band``, the same field name the four-tank, the
+        # distillation column and the pH loop carry: the error at which
+        # tracking is bad for this plant. It read ``params.tracking_scale``,
+        # 40 K, left over from when the reward was ``clip(1 - err/40, 0, 1)**2``
+        # -- the reward has been log-scaled for a while and that field was dead.
+        # 40 K against errors of about 1 K put the tracking term at 6e-4 while
+        # the fuel penalty stayed O(1), so the objective was nearly flat in the
+        # direction being scored, which is both why this MPC trails its own PID
+        # and why IPOPT struggles on it.
+        scale = float(p.tracking_band)
         fuel_span = float(p.fuel_max - p.fuel_min)
         err = target_post - T_crown_post
         err_abs = casadi.sqrt(err * err + 1e-4)  # smooth |err|
@@ -790,6 +896,14 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
                 # it away: 1 while chamber A preheats the air, 0 while B does.
                 cycles = (future * self.mpc_dt) / p_rev
                 tvp_tpl["_tvp", k, "a_is_air"] = float(1.0 - (np.floor(cycles) % 2.0))
+                tvp_tpl["_tvp", k, "firing"] = float(firing_fraction(future, p, xp=np))
+                # The first FUEL_DEAD_TIME_STEPS intervals burn what is already
+                # in the pipeline. Beyond that the optimiser decides.
+                committed = k < len(self._pipeline)
+                tvp_tpl["_tvp", k, "commit"] = 1.0 if committed else 0.0
+                tvp_tpl["_tvp", k, "u_committed"] = (
+                    float(self._pipeline[k]) if committed else 0.0
+                )
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
@@ -797,13 +911,31 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         mpc.setup()
         return mpc
 
-    def _extract_x0(self, state):
-        """The plant's own regenerator state, both chambers, all nodes.
+    @staticmethod
+    def _coarsen(nodes) -> np.ndarray:
+        """The plant's checker nodes averaged onto the controller's, hot end first.
 
-        This used to average the two chambers and resample four nodes onto
-        three. The model now carries the plant's structure, so the state passes
-        through unreduced -- which is what an upper-bound controller should be
-        given, and it already reads the true state rather than the observation.
+        Both chambers are kept, because they alternate duty and averaging them
+        together is what left a standing offset. What is coarsened is the depth
+        resolution within a chamber, which is a smooth profile down the stack:
+        contiguous groups average to the temperature a node of that size would
+        hold, and the group heat capacity is scaled to match in ``_build_mpc``.
+        """
+        x = np.asarray(nodes, dtype=float)
+        n = _FURNACE_MPC_REGEN_NODES
+        if x.size == n:
+            return x
+        return x.reshape(n, x.size // n).mean(axis=1)
+
+    def _extract_x0(self, state):
+        """The plant's regenerator state, both chambers, coarsened in depth.
+
+        This once averaged the two chambers together *and* resampled four nodes
+        onto three; that cost 2-6 K of standing offset, because everything
+        downstream of the checker temperatures is nonlinear in them and the two
+        chambers are never at the same temperature. Both chambers are kept now.
+        The depth resolution is halved instead, which is what makes the NLP
+        affordable: see ``_FURNACE_MPC_REGEN_NODES``.
         """
         return np.concatenate(
             [
@@ -815,8 +947,8 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
                         float(state.m_batch),
                     ]
                 ),
-                np.asarray(state.T_rA, dtype=float),
-                np.asarray(state.T_rB, dtype=float),
+                self._coarsen(state.T_rA),
+                self._coarsen(state.T_rB),
             ]
         )
 
@@ -833,6 +965,10 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
     def _update_setpoint(self, state):
         self._target_schedule = np.asarray(state.target_schedule, dtype=float)
         self._current_step = int(state.time)
+        # What the plant will burn over the next intervals regardless of what is
+        # decided now. An upper-bound controller reads the true state, and this
+        # is part of it.
+        self._pipeline = np.asarray(state.fuel_pipeline, dtype=float)
 
         # Offset-free correction. ``_extract_x0`` collapses the plant's two
         # four-node regenerator chambers onto the model's three nodes by
@@ -1370,6 +1506,67 @@ class PHCasadiMPC(CasadiMPC):
 # ============================================================================
 
 
+_PLANE_STALL_MARGIN = 1.3  # multiples of stall speed at which the barrier starts
+_PLANE_BARRIER_WEIGHT = 10.0
+
+
+def _plane_objective(state, params):
+    """The aircraft's own reward, less a barrier on flying into the stall.
+
+    The altitude reward scores one thing and the aircraft has two actuators, so
+    the planner is free to buy altitude with airspeed. Over a 90 s window that
+    is the *best* thing it can do when the target is thousands of metres away:
+    a zoom climb converts kinetic energy to potential energy far faster than
+    the engines can supply it. Measured on ``plane_steps`` seed 0, that is
+    exactly what the plan did -- airspeed fell monotonically from 201 to 30 m/s
+    over 90 s while the aircraft climbed 3300 m, touched the commanded altitude
+    with nothing left, departed at 91 deg angle of attack and hit the ground at
+    t=372. It happened on ``plane`` too; there the phugoid that followed
+    happened to damp out, which is luck rather than control.
+
+    Angle of attack is the wrong thing to fence, even though it is what
+    actually stalls: through that whole manoeuvre it sat at 4-8 deg and only
+    crossed 15 deg at t=90, one step from the departure and at the very end of
+    the planning window. Airspeed decays through the entire climb, so a floor
+    under it is a constraint the planner can see coming and descend.
+
+    The floor is the stall speed at this mass and altitude rather than a fixed
+    number, since both move: ``sqrt(2 m g / (rho S CL_max))`` is where the wing
+    can no longer carry the weight, and the barrier switches on at 1.3 times
+    it, the usual approach margin. Bounded in [0, 1] by construction, which is
+    what lets ``done_value`` stay below the worst step the planner can plan, so
+    flying into the ground cannot look better than flying slowly.
+
+    Measured on ``plane_steps`` seed 0 over 400 s: return 304 against 83 for
+    the unprotected planner, settled error 0.1 m, and airspeed held above
+    128 m/s with a worst angle of attack of 7.7 deg. On ``plane``, 226 against
+    189. Like the turbine's barrier, the constants barely matter -- weight 30
+    scores 299 and a 1.15 margin 299 -- which is the signature of a term
+    shaping the approach rather than trading against the objective.
+
+    Two alternatives, both measured and both rejected. Doubling the tail to
+    ``n_tail=120`` prices more of the aftermath and does fix seed 0 (274), but
+    it costs two thirds again in compute and only moves the horizon at which
+    the same trade becomes profitable. Making the planner hold airspeed
+    outright, by planning against ``speed_weight=1.0``, flies beautifully for
+    400 s (166, angle of attack 2.1 deg) and then crashes anyway at t=1260 on
+    the full episode and at t=386 on seed 2: it changes which trim the planner
+    settles into without ever putting a floor under the trade.
+    """
+    from target_gym.plane.env import compute_reward
+
+    reward = compute_reward(state, params)
+    speed = jnp.sqrt(state.x_dot**2 + state.z_dot**2)
+    v_stall = jnp.sqrt(
+        2.0
+        * state.m
+        * params.gravity
+        / (state.rho * params.wings_surface * params.CL_max)
+    )
+    margin = speed / (_PLANE_STALL_MARGIN * v_stall)
+    return reward - _PLANE_BARRIER_WEIGHT * jnp.maximum(1.0 - margin, 0.0) ** 2
+
+
 def make_plane_mpc(
     env,
     params,
@@ -1377,6 +1574,7 @@ def make_plane_mpc(
     n_iter: int = 50,
     lr: float = 0.05,
     n_tail: int = 60,
+    objective_fn=_plane_objective,
 ):
     """Gradient MPC for Airplane2D — optimises both power and stick in [-1, 1].
 
@@ -1384,15 +1582,25 @@ def make_plane_mpc(
     including aerodynamic coefficients that are not expressible in CasADi
     without a full symbolic re-implementation.  dt=1.0 s; horizon=30.
 
-    ``n_tail=60`` is what makes this controller work. Optimising 30 s of flight
-    and being charged for nothing beyond it, the plan climbed hard, ran the
-    airspeed down and left the aircraft outside the altitude envelope just past
-    the horizon: it settled 654x worse than the PID and crashed in one episode
-    of two. Simulating 60 further seconds on the held action -- which for this
-    aircraft is close to trim -- prices that ending into the objective. Measured
-    over 600-step episodes, settled tracking error goes from 2949 m to 0.083 m,
-    which is 55x *better* than the PID rather than 654x worse, with no
-    terminations. Sixty is the knee: 120 is no better (0.092 m) and costs twice.
+    Two things make it fly. The objective carries a stall barrier, without
+    which the planner trades all its airspeed for altitude on every
+    acquisition and departs; see ``_plane_objective``, which is where that is
+    measured. And ``n_tail=60``: optimising 30 s of flight and being charged
+    for nothing beyond it, the plan climbed hard and left the aircraft outside
+    the altitude envelope just past the horizon, settling 654x worse than the
+    PID and crashing in one episode of two. Simulating 60 further seconds on
+    the held action -- which for this aircraft is close to trim -- prices that
+    ending into the objective. Measured over 600-step episodes, settled
+    tracking error went from 2949 m to 0.083 m, with no terminations. Sixty is
+    the knee: 120 is no better on a fixed setpoint and costs twice.
+
+    The tail alone was not enough, which is why the barrier is here. It fixes
+    the ending the plan can *see*; the zoom climb is an ending the plan likes,
+    and no affordable horizon changes that.
+
+    ``done_value`` sits below the worst step the objective can score, so a plan
+    that reaches the ground is charged for the rest of the horizon rather than
+    scoring the 0.0 that a barrier-free positive reward could rely on.
     """
     return GradientMPC(
         env,
@@ -1404,6 +1612,8 @@ def make_plane_mpc(
         n_iter=n_iter,
         lr=lr,
         n_tail=n_tail,
+        objective_fn=objective_fn,
+        done_value=-(_PLANE_BARRIER_WEIGHT + 1.0),
     )
 
 

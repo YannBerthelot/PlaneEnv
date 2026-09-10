@@ -63,6 +63,45 @@ def test_reset_returns_obs_matching_observation_space(spec):
     assert np.all(np.isfinite(np.asarray(obs)))
 
 
+def test_env_declares_where_the_value_and_its_target_live(spec):
+    """Both index attributes must exist and address finite observations.
+
+    ``runners.rollout`` reads both to know what it is plotting and scoring, so
+    an environment missing one cannot be rolled out at all. That is not a
+    theoretical failure: ``Plane3DRacetrack`` shipped without
+    ``obs_target_index``, and since the gain search scores candidates inside a
+    ``try`` it reported every one of them as ``-inf`` and tuned nothing, while
+    ``scripts/record_baselines.py`` could not have recorded the environment.
+
+    The equivalents in ``tests/test_runners.py`` name three classes by hand,
+    which is why a fourth got past them. This one sweeps the registry.
+    """
+    from target_gym.runners.runners import _as_tuple
+
+    env, params = spec.make_env(), spec.make_test_params()
+    for attr in ("obs_value_index", "obs_target_index"):
+        assert hasattr(env, attr), (
+            f"{spec.name}: no {attr}. Nothing can roll this environment out "
+            f"until it says which observation carries its tracked value and "
+            f"which carries the setpoint."
+        )
+
+    obs, _ = env.reset_env(jax.random.PRNGKey(0), params)
+    obs = np.asarray(obs)
+    value_idx = _as_tuple(env.obs_value_index)
+    target_idx = _as_tuple(env.obs_target_index)
+    assert len(value_idx) == len(target_idx), (
+        f"{spec.name}: {len(value_idx)} tracked value(s) against "
+        f"{len(target_idx)} target(s). Every tracked value needs its setpoint."
+    )
+    for i in (*value_idx, *target_idx):
+        assert 0 <= i < obs.shape[-1], (
+            f"{spec.name}: index {i} is outside an observation of "
+            f"{obs.shape[-1]} elements."
+        )
+        assert np.isfinite(obs[i]), f"{spec.name}: observation {i} is not finite."
+
+
 def test_reset_starts_the_clock_at_zero(spec):
     env, params = spec.make_env(), spec.make_test_params()
     _, state = env.reset_env(jax.random.PRNGKey(0), params)
@@ -806,7 +845,17 @@ def test_plant_does_not_accelerate_without_input(spec):
     fifth = max(len(inc) // 5, 1)
     early = inc[:fifth].mean(axis=0)
     late = inc[-fifth:].mean(axis=0)
-    ratio = np.where(early > 1e-12, late / np.maximum(early, 1e-12), 0.0)
+
+    # Only fields that actually move are measurable. The floor has to scale
+    # with the field, because JAX computes in float32 and a stationary field
+    # still jitters in its last bits: ``plane3d_figure8`` flies wings level
+    # under zero input, so its heading is constant at 1.4296085 rad, and the
+    # increments are 1e-9 early against 1.5e-8 late -- both far below the
+    # 1.7e-7 that is one float32 ULP at that magnitude. An absolute 1e-12 floor
+    # admitted that as a 15x acceleration and failed the check on round-off.
+    noise = 32.0 * np.finfo(np.float32).eps * np.maximum(np.abs(tr).mean(axis=0), 1.0)
+    measurable = early > np.maximum(noise, 1e-12)
+    ratio = np.where(measurable, late / np.maximum(early, 1e-12), 0.0)
     j = int(np.argmax(ratio))
 
     assert ratio[j] < ACCELERATION_LIMIT, (
@@ -829,6 +878,8 @@ KNOWN_SEAMS = {
     # The same aircraft, flying a moving setpoint: same plant, same seam.
     "plane_steps": "shock-stall model near 308 m/s, unreachable (same plant as plane)",
     "plane_sine": "shock-stall model near 308 m/s, unreachable (same plant as plane)",
+    "plane_energy": "shock-stall model near 308 m/s, unreachable (same plant as plane)",
+    "plane3d_racetrack": "shock-stall model near 308 m/s, unreachable (same airframe)",
     "plane3d_heading": "shock-stall model near 308 m/s, unreachable",
     "plane3d_circle": "shock-stall model near 308 m/s, unreachable",
     "plane3d_figure8": "shock-stall model near 308 m/s, unreachable",

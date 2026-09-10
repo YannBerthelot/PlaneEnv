@@ -24,7 +24,7 @@ Deliberately **not** modelled (and why):
 | Omitted | Rationale |
 |---|---|
 | Lateral/directional dynamics (roll, yaw, sideslip) | 2D task; the 3D envs add roll. |
-| Fuel burn | `specific_fuel_consumption` exists but mass is held constant; the altitude task is short relative to the fuel time constant. |
+| ~~Fuel burn~~ | **Now modelled.** ``specific_fuel_consumption`` charges thrust against the tank each step and ``m`` is recomputed from what is left, so the aircraft lightens as it flies. This row said mass was held constant long after that stopped being true. |
 | Flaps / slats / gear | Clean configuration only. Makes the low-speed regime unrepresentative — see §5. |
 | Aeroelasticity, ground effect | Negligible at task altitudes. |
 | Engine spool dynamics beyond first-order lag | `compute_next_power` is a 1st-order lag; adequate for setpoint tracking. |
@@ -196,6 +196,27 @@ meaningful, not where it stops being required: the reward flattens beneath it,
 and it is set to a physical resolution (a barometric altimeter reads to about a
 metre) rather than to a chosen tolerance. It also keeps the reward bounded,
 since an unfloored logarithm diverges at zero error.
+
+### Task variants and initial conditions
+
+The plant is shared; `target_pattern` selects what is commanded. `plane` holds a
+level, `plane_sine` tracks a sinusoid as a frequency probe, and `plane_energy`
+walks a ladder of levels *and* scores airspeed, which removes the spare degree of
+freedom two actuators against one objective would otherwise leave. Setting
+`speed_weight = 0` on `plane_energy` recovers the pure altitude staircase, which
+used to be registered separately as `plane_steps`.
+
+The ladder is eight levels drawn from `_STEP_LEVELS`, fractions of
+`target_amplitude` chosen so that adjacent changes run 0.2 to 0.8 of it and
+neither the level nor the direction repeats on a two-tread cycle. It replaced a
+square wave alternating between two altitudes 2.4 km apart, which the aircraft
+could fly but which is not what an altitude-hold task looks like.
+
+Episodes start near the commanded level, within
+`initial_altitude_offset_range`, rather than drawing the start independently of
+the target over the same 5 km band. Independent draws gave a median start
+1.7 km from the assigned level, so the episode opened with minutes of open-loop
+climb before any tracking began.
 
 ## 5. Known deviations
 

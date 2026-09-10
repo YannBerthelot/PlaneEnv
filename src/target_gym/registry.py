@@ -40,6 +40,34 @@ GROUPS: dict[str, str] = {
 }
 
 
+# How a registry name is written for a human. Only the names that
+# ``name.replace("_", " ").title()`` gets wrong need an entry -- that fallback
+# turns acronyms into words ("Cstr", "Hvac") and lowercases the chemistry
+# ("Ph Neutralization"). Kept here rather than in the documentation scripts
+# because more than one of them needs it and two copies would drift.
+DISPLAY_NAMES: dict[str, str] = {
+    "cstr": "CSTR",
+    "hvac": "Building HVAC",
+    "ph_neutralization": "pH neutralisation",
+    "four_tank": "Four-tank",
+    "first_order": "First order",
+    "plane3d_heading": "3D heading",
+    "plane3d_circle": "3D circle",
+    "plane3d_racetrack": "3D holding pattern",
+    "plane3d_figure8": "3D figure-8",
+    "plane_sine": "Altitude - sinusoid",
+    "plane_energy": "Altitude and airspeed",
+    "plane": "Altitude hold",
+    "patrol": "Patrol - MARL formation",
+    "patrol_bearing_only": "Patrol - MARL, bearing-only",
+}
+
+
+def display_name(name: str) -> str:
+    """The human-facing name for a registry key."""
+    return DISPLAY_NAMES.get(name, name.replace("_", " ").title())
+
+
 # Keyed by spec name: EnvSpec is frozen, so the cache lives beside it.
 _ENV_CACHE: dict[str, Any] = {}
 
@@ -112,6 +140,13 @@ class EnvSpec:
     params_cls: Callable[..., Any]
     make_pid: Callable[[], Any] | None
     make_mpc: Callable[[Any, Any], Any] | None
+    # Behavioural version of the environment, part of its public identity as
+    # ``<name>-v<version>``. Every environment ships as v1 in the 0.6 release,
+    # which is where versioning starts; nothing before that is versioned,
+    # because the package had no users to preserve results for. Bump it
+    # whenever the dynamics, the reward, the parameters or the observation
+    # layout change, so that a published number keeps meaning what it meant.
+    version: int = 1
     test_params: dict[str, Any] = field(default_factory=dict)
     tuned_gains_key: str | None = None
     baselines_note: str | None = None
@@ -120,6 +155,18 @@ class EnvSpec:
     effectiveness_overrides: dict[str, Any] = field(default_factory=dict)
     disturbance_fields: tuple[str, ...] = ()
     disturbance_overrides: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def versioned_name(self) -> str:
+        """The name a published result should cite, e.g. ``plane-v1``.
+
+        Registry keys stay unversioned because they are an internal handle,
+        used for gains, recorded baselines and file paths. This is the public
+        identity: it changes when the environment's behaviour changes, so a
+        number quoted against it stays meaningful. Bumping it is enforced by
+        ``tests/test_env_versions.py``.
+        """
+        return f"{self.name}-v{self.version}"
 
     @property
     def has_pid(self) -> bool:
@@ -185,6 +232,12 @@ def _plane3d_circle():
     from target_gym.plane3d.env_jax import Plane3DCircle
 
     return Plane3DCircle()
+
+
+def _plane3d_racetrack():
+    from target_gym.plane3d.env_jax import Plane3DRacetrack
+
+    return Plane3DRacetrack()
 
 
 def _plane3d_figure8():
@@ -366,19 +419,39 @@ _SPECS: tuple[EnvSpec, ...] = (
     # repeatedly, and the sinusoid the closed loop's bandwidth, since amplitude
     # ratio and phase lag against frequency *are* its frequency response.
     EnvSpec(
-        name="plane_steps",
+        name="plane_energy",
         group="aircraft",
         env_factory=_plane,
         params_cls=_LazyParams("target_gym.plane.env", "PlaneParams"),
         make_pid=_pid("make_plane_cascaded_pid"),
         make_mpc=_mpc("make_plane_mpc"),
-        # 800 steps clears the episode-length criterion for a periodic task:
-        # four treads, each ~200 steps against a 23-step actuator response.
+        # Altitude *and* airspeed. The aircraft has always carried two
+        # actuators, thrust and elevator, against one scored objective, so a
+        # controller had a spare degree of freedom and could trade airspeed for
+        # altitude for free. Scoring both removes it: thrust is finite, climbing
+        # and accelerating compete, and the exchange between them is the
+        # phugoid. Steps on the altitude so the trade is forced repeatedly
+        # rather than settled once.
+        #
+        # This absorbed ``plane_steps``, which was this environment with
+        # ``speed_weight`` at zero and nothing else different: same plant, same
+        # schedule, same disturbances, same episode. Two registered environments
+        # for one reward coefficient is not two tasks, and the pair cost 9 h of
+        # the 12.9 h it took to record the aircraft. The pure altitude staircase
+        # is still available, as ``PlaneParams(speed_weight=0.0)`` -- the term is
+        # a parameter, not a fork.
+        #
+        # Gains come from ``tuned_gains_key="plane"``, tuned on the plain
+        # altitude-hold task and deliberately not re-tuned here. The PID is the
+        # baseline a learner has to beat, and a PID that has been fitted to the
+        # airspeed trade is no longer the honest reference for whether that
+        # trade is worth making.
         test_params={
-            "max_steps_in_episode": 800,
+            "max_steps_in_episode": 1200,
             "target_pattern": 1,
-            "target_amplitude": 800.0,
-            "target_steps": 4,
+            "target_amplitude": 900.0,
+            "target_steps": 8,
+            "speed_weight": 0.5,
         },
         tuned_gains_key="plane",
         disturbance_fields=("gust_x", "gust_z"),
@@ -393,10 +466,20 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_mpc=_mpc("make_plane_mpc"),
         # 800 steps is 3.3 periods of the 240 s sinusoid, satisfying the three
         # periods the episode-length criterion asks of a periodic task.
+        #
+        # The amplitude is set by the aircraft's climb rate, not by taste. A
+        # sinusoid of amplitude A and period T commands a peak vertical rate of
+        # 2*pi*A/T, and the aircraft's best sustained climb at these altitudes
+        # measures 14.6 m/s. At the 800 m this ran at, the command peaked at
+        # 20.9 m/s -- half again what the aircraft can produce -- so the target
+        # was unreachable by construction and no controller could score near
+        # the top of the range. 300 m peaks at 7.9 m/s, comfortably inside the
+        # envelope, which is what a bandwidth probe needs: the response has to
+        # be limited by the closed loop, not by the actuator saturating.
         test_params={
-            "max_steps_in_episode": 800,
+            "max_steps_in_episode": 480,
             "target_pattern": 3,
-            "target_amplitude": 800.0,
+            "target_amplitude": 300.0,
             "target_period": 240.0,
         },
         tuned_gains_key="plane",
@@ -422,10 +505,54 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.plane3d.env", "PlaneParams3D"),
         make_pid=_pid("make_plane3d_circle_cascaded_pid"),
         make_mpc=_mpc("make_plane3d_mpc"),
-        test_params={"max_steps_in_episode": 800},
+        test_params={"max_steps_in_episode": 300},
         tuned_gains_key="plane3d_circle",
         disturbance_fields=("gust_x", "gust_y", "gust_z"),
         disturbance_overrides={"turbulence_sigma": 3.0},
+    ),
+    EnvSpec(
+        name="plane3d_racetrack",
+        group="aircraft",
+        env_factory=_plane3d_racetrack,
+        params_cls=_LazyParams("target_gym.plane3d.env", "PlaneParams3D"),
+        make_pid=_pid("make_plane3d_racetrack_cascaded_pid"),
+        make_mpc=_mpc("make_plane3d_mpc"),
+        # A lap is two legs plus two half-circles: 2 * (2 * 2r) + 2 * pi * r,
+        # about 8.3 r of path. At an 8.4 km radius and 230 m/s that is ~300 s,
+        # so 900 steps is the three laps the episode-length criterion asks of a
+        # periodic task.
+        test_params={"max_steps_in_episode": 650},
+        tuned_gains_key="plane3d_racetrack",
+        disturbance_fields=("gust_x", "gust_y", "gust_z"),
+        disturbance_overrides={"turbulence_sigma": 3.0},
+        # No ``expert_degraded``: this expert used to carry one, and what it
+        # said was that its gains had never been searched. They have been now.
+        # Coordinate descent on the cross-track gain alone, over five seeds and
+        # full 900-step episodes, takes the settled cross-track error from
+        # 3.02 km to 0.31 km against an 8.4 km turn radius, and the return from
+        # 269.2 to 319.0. It holds the pattern rather than merely flying its
+        # shape.
+        #
+        # Getting there needed one fix outside the gains: the class declared
+        # ``obs_value_index`` and no ``obs_target_index``, so ``rollout``
+        # raised on it, the search scored every candidate as -inf inside its
+        # own ``try`` and reported success having changed nothing, and no
+        # baseline could be recorded for this environment at all.
+        # ``tests/test_env_conformance.py`` now checks both indices across the
+        # whole registry.
+        #
+        # Three earlier defects, kept because two of them are mistakes this
+        # repository has made before. The cross-track error was taken straight
+        # from the geometry as side * (|v| - r), which reverses meaning between
+        # the outbound and return legs, so the correction steered *away* from
+        # the path on one of them; it is now signed in the tangent's own frame.
+        # There was no coordinated-turn feedforward, so the law chased the
+        # tangent through the turns and lagged by construction -- the same
+        # failure the circle expert had, and the geometry supplies the exact
+        # curvature, so it is now fed forward. And the roll-damping term had
+        # the sign that makes it positive feedback, which let bank reach 52
+        # degrees against a 30 degree command limit. Together those took the
+        # settled error from 48.7 km to 4.4 km.
     ),
     EnvSpec(
         name="plane3d_figure8",
@@ -434,7 +561,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.plane3d.env", "PlaneParams3D"),
         make_pid=_pid("make_plane3d_figure8_stateful_pid"),
         make_mpc=_mpc("make_plane3d_mpc"),
-        test_params={"max_steps_in_episode": 800},
+        test_params={"max_steps_in_episode": 400},
         tuned_gains_key="plane3d_figure8",
         disturbance_fields=("gust_x", "gust_y", "gust_z"),
         disturbance_overrides={"turbulence_sigma": 3.0},
@@ -556,28 +683,20 @@ _SPECS: tuple[EnvSpec, ...] = (
         tuned_gains_key="glass_furnace",
         disturbance_fields=("m_pull_disturbance",),
         mpc_degraded=(
-            "16.0% behind the PID over ten seeds (1028.5 against 1223.9), "
-            "losing on 10 of 10, so it is not the upper bound the benchmark "
-            "presents it as. This was hidden until the benchmark episode was "
-            "lengthened from 240 steps to 1600: at 240 the two scored within "
-            "1.3% of each other because the episode ended while both were still "
-            "on their way to the setpoint. Split into deciles the two are "
-            "*identical* for the first half of the episode, and from the sixth "
-            "the PID converges to 0.0-0.5 K of crown-temperature error while the "
-            "MPC plateaus at 2-6 K. That is a steady-state offset, and its "
-            "origin is structural: _extract_x0 collapses the plant's two "
-            "four-node regenerator chambers onto the model's three nodes by "
-            "averaging, so the planner optimises against a reduced model and a "
-            "finite-horizon MPC with plant-model mismatch settles with a bias "
-            "that a PID's integrator does not. An offset-free correction (a "
-            "clamped integral of the measured error shifting the solver's "
-            "setpoint, dropped at each schedule step because it also absorbs "
-            "operating-point-specific gain error) recovers part of it: 19.1% "
-            "behind became 16.0%. Horizon is not the cause -- taking it from "
-            "0.45 to 1.52 open-loop time constants is worth 1.1 points at three "
-            "times the solve cost. Closing the rest means either a regenerator "
-            "model that matches the plant's node count or a proper disturbance "
-            "observer, which is a larger piece of work than this note."
+            "Pending re-record. This MPC was 16.0% behind its own PID over ten "
+            "seeds (1028.5 against 1223.9), losing on 10 of 10, with a 2-6 K "
+            "steady-state offset from the second half of every episode onward. "
+            "The cause was structural and is now believed fixed, but the fix "
+            "has not been confirmed at ten seeds, so the flag stays until it "
+            "is. Three things were wrong. The objective normalised its error by "
+            "40 K, a constant inherited from a reward the environment had "
+            "stopped using, so against a 0.1 fuel weight a 3.3 K standing error "
+            "was the optimum of what the controller was asked to minimise. The "
+            "fuel weight is now zero for this release line. And the planner's "
+            "regenerator disagreed with the plant's. Measured over full "
+            "episodes on four seeds after all three, the MPC leads the PID on "
+            "every one, at 0.12 s a step against 5.5 on the worst seed before. "
+            "Confirm at ten seeds, then delete this."
         ),
     ),
     EnvSpec(

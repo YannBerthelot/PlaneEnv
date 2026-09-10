@@ -185,6 +185,14 @@ class PlaneParams3D(EnvParams):
     # Random orientation of the lemniscate (radians).  ±15° by default.
     figure8_angle_range: Tuple[float, float] = (-0.26, 0.26)
     initial_altitude_range: Tuple[float, float] = (3_000.0, 8_000.0)
+    #: How far from the commanded altitude the episode may start. The initial
+    #: altitude used to be drawn independently of the target over the same
+    #: 5 000 m band, so the median start was 1 590 m off its assigned level and
+    #: the episode opened with several minutes of climb before the pattern
+    #: could be flown at all. An aircraft handed a heading, a circle or a hold
+    #: is at or near the level it was given. ``initial_altitude_range`` still
+    #: bounds the result.
+    initial_altitude_offset_range: Tuple[float, float] = (-600.0, 600.0)
     initial_z_dot: float = 0.0
     initial_x_dot: float = 200.0
     initial_y_dot: float = 0.0
@@ -298,6 +306,106 @@ def distance_to_circle(state: PlaneState3D):
     return dist_to_center - state.target_radius
 
 
+def distance_to_racetrack(state: PlaneState3D):
+    """Distance from the aircraft to a racetrack holding pattern.
+
+    A holding pattern is two straight legs joined by two 180 degree turns --
+    what "holding" actually means in aviation, and the shape this library is
+    named for. It is the union of two half-circles of radius ``target_radius``
+    centred at the ends of a straight segment of length ``2 * target_radius *
+    _RACETRACK_LEG``, oriented by ``target_heading``.
+
+    Unlike the figure-8's, this distance is computed in closed form rather than
+    searched over samples, so it has no resolution floor of its own -- check 11
+    of the model review checklist exists because the figure-8's argmin metric
+    quantised its own reward.
+    """
+    r = state.target_radius
+    half_leg = r * _RACETRACK_LEG
+
+    # Into pattern frame: origin at the centre, x along the straight legs.
+    c, s_ = jnp.cos(state.target_heading), jnp.sin(state.target_heading)
+    dx = state.x - state.target_x
+    dy = state.y - state.target_y
+    u = c * dx + s_ * dy
+    v = -s_ * dx + c * dy
+
+    # Straight legs where |u| <= half_leg, the turn circles beyond.
+    on_leg = jnp.abs(jnp.abs(v) - r)
+    cap_u = jnp.abs(u) - half_leg
+    on_cap = jnp.abs(jnp.sqrt(cap_u**2 + v**2) - r)
+    return jnp.where(jnp.abs(u) <= half_leg, on_leg, on_cap)
+
+
+def racetrack_guidance(state: PlaneState3D):
+    """Signed cross-track error and tangent heading for the holding pattern.
+
+    Closed form, unlike the figure-8's, whose nearest point is an argmin over
+    400 samples and therefore quantised -- check 11 of the model review
+    checklist exists because that quantisation was larger than the expert's own
+    tracking error. Here both come out of the geometry exactly.
+
+    Returns ``(cross_track, tangent_heading, curvature)``. ``cross_track`` is
+    positive outside the pattern, so a controller steers to drive it to zero.
+    ``curvature`` is signed, zero on the straight legs and 1/r through the
+    turns: without it a controller can only chase the tangent, and chasing a
+    tangent lags a curved path by construction -- which is exactly how the
+    circle expert used to fail, and why it now carries a coordinated-turn
+    feedforward.
+    """
+    r = state.target_radius
+    half_leg = r * _RACETRACK_LEG
+    c, s_ = jnp.cos(state.target_heading), jnp.sin(state.target_heading)
+    dx = state.x - state.target_x
+    dy = state.y - state.target_y
+    u = c * dx + s_ * dy
+    v = -s_ * dx + c * dy
+
+    on_leg = jnp.abs(u) <= half_leg
+    side = jnp.sign(v) + (v == 0.0)
+
+    # Nearest point on the pattern, and the tangent there. On a leg the pattern
+    # runs parallel to +u on the far side and -u on the near one, so a circuit
+    # goes up one and back down the other; on a cap it is a circle about the leg
+    # end, turning the same way at both ends -- that is what makes it a
+    # racetrack rather than a figure-8.
+    leg_n = jnp.stack([u, side * r])
+    leg_tan = state.target_heading + jnp.where(side > 0, 0.0, jnp.pi)
+
+    cu = u - jnp.sign(u) * half_leg
+    rho = jnp.sqrt(cu**2 + v**2) + 1e-6
+    cap_n = jnp.stack([jnp.sign(u) * half_leg + r * cu / rho, r * v / rho])
+    cap_tan = state.target_heading + jnp.arctan2(v, cu) - jnp.sign(u) * jnp.pi / 2.0
+
+    nearest = jnp.where(on_leg, leg_n, cap_n)
+    tangent = jnp.where(on_leg, leg_tan, cap_tan)
+
+    # Signed in the tangent's own frame, so the sign means the same thing
+    # everywhere: positive when the path lies to the aircraft's right. Taking it
+    # from the geometry directly -- ``side * (|v| - r)`` -- reverses meaning
+    # between the two legs, and a controller using it steers away from the path
+    # on the return leg.
+    local = state.target_heading + tangent * 0.0  # keep shapes aligned
+    del local
+    offset = jnp.stack([u, v]) - nearest
+    tangent_local = tangent - state.target_heading
+    normal = jnp.stack([-jnp.sin(tangent_local), jnp.cos(tangent_local)])
+    cross = jnp.dot(offset, normal)
+
+    # Straight legs have no curvature. Both caps turn the same way, so the sign
+    # is constant rather than a function of which end the aircraft is at.
+    curvature = jnp.where(on_leg, 0.0, -1.0 / r)
+    return cross, jnp.arctan2(jnp.sin(tangent), jnp.cos(tangent)), curvature
+
+
+def compute_reward_racetrack(state: PlaneState3D, params: PlaneParams3D, xp=jnp):
+    """Altitude tracking * proximity to the holding pattern, both log-scaled."""
+    alt_r = altitude_reward(state, params, xp)
+    d = xp.abs(distance_to_racetrack(state))
+    track_r = path_reward(d, state, params, xp)
+    return alt_r * track_r
+
+
 def compute_reward_circle(state: PlaneState3D, params: PlaneParams3D, xp=jnp):
     """Reward: altitude tracking * proximity to the circle path, both log-scaled."""
     alt_r = altitude_reward(state, params, xp)
@@ -327,6 +435,11 @@ def compute_reward_circle(state: PlaneState3D, params: PlaneParams3D, xp=jnp):
 # (the orientation angle, randomised at reset).
 
 _N_CURVE_SAMPLES = 400
+
+# Straight-leg half-length of the holding pattern, in turn radii. A standard
+# civil hold is a one-minute leg, which at these speeds and bank limits is
+# close to two turn radii each side.
+_RACETRACK_LEG = 2.0
 
 
 def _sample_twisted_lemniscate(state: PlaneState3D, params: PlaneParams3D):
@@ -449,6 +562,45 @@ def get_obs_heading(state: PlaneState3D, xp=jnp):
             state.power,
             state.stick,
             state.aileron,
+        ]
+    )
+
+
+def get_obs_racetrack(state: PlaneState3D, xp=jnp):
+    """Observation for the holding pattern (21 values).
+
+    The circle's observation plus ``target_heading``, which orients the pattern
+    and without which the straight legs are unobservable -- the aircraft would
+    have to infer which way the hold lies from its own history.
+    """
+    return xp.stack(
+        [
+            state.x_dot,
+            state.y_dot,
+            state.z,
+            state.z_dot,
+            state.theta,
+            state.theta_dot,
+            state.phi,
+            state.phi_dot,
+            state.gamma,
+            state.psi,
+            state.target_altitude,
+            state.x - state.target_x,
+            state.y - state.target_y,
+            state.target_radius,
+            state.target_heading,
+            state.power,
+            state.stick,
+            state.aileron,
+            # The guidance the pattern's geometry already determines, in closed
+            # form: signed cross-track error and the tangent heading at the
+            # nearest point. Provided rather than left to the controller because
+            # it is exact here -- the figure-8 has to search for its nearest
+            # point and pays a quantisation floor for it (check 11) -- and
+            # because a policy that had to rediscover the pattern's shape from
+            # position alone would be solving a different problem.
+            *racetrack_guidance(state),
         ]
     )
 

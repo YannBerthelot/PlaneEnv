@@ -145,9 +145,12 @@ before reading any result from it.
 | first_order | 100 | 10 | 50 | 0.99000 |
 | hvac | 720 | 62 | 310 | 0.99861 |
 | plane | 280 | 23 | 115 | 0.99643 |
+| plane_energy | 1200 | 23 | 115 | 0.99917 |
+| plane_sine | 480 | 23 | 115 | 0.99792 |
 | plane3d_heading | 200 | 14 | 70 | 0.99500 |
-| plane3d_circle | 800 | 14 | 70 | 0.99875 |
-| plane3d_figure8 | 800 | 38 | 190 | 0.99875 |
+| plane3d_circle | 300 | 14 | 70 | 0.99667 |
+| plane3d_figure8 | 400 | 38 | 190 | 0.99750 |
+| plane3d_racetrack | 650 | 14 | 70 | 0.99846 |
 | patrol | 200 | 13 | 65 | 0.99500 |
 | patrol_bearing_only | 200 | 12 | 60 | 0.99500 |
 | distillation | 200 | 8 | 40 | 0.99500 |
@@ -202,6 +205,35 @@ longer needed.
 The circle is the instructive one: at 14.3 tau it passed the settling test
 comfortably and was still being scored over three-quarters of a single lap. A
 single criterion would have missed it.
+
+**And then five were shortened again.** The table above records what happened
+when the criterion was first applied; it is not the current state. Applying the
+same criterion a second time, after the setpoint schedules changed, found the
+opposite problem: several episodes had drifted far above what it asks, and
+recording them was the dominant cost in the suite. The three-period requirement
+was also relaxed to one lap, on the grounds that a controller that flies one lap
+on the path will fly the next.
+
+| environment | was | now | binding criterion | recording cost |
+| --- | --- | --- | --- | --- |
+| plane_energy | 2400 (104.3 tau) | 1200 | 52.2 tau | 14 595 s -> ~7 300 |
+| plane_sine | 800 (34.8 tau) | 480 | 2.0 periods | 4 980 s -> ~3 000 |
+| plane3d_circle | 800 (3.0 laps) | 300 | 1.14 laps | 2 256 s -> ~850 |
+| plane3d_racetrack | 900 (1.5 laps) | 650 | 1.08 laps | 2 010 s -> ~1 450 |
+| plane3d_figure8 | 800 (3.6 laps) | 400 | 10.5 tau | 2 205 s -> ~1 100 |
+
+`plane_sine` keeps two periods rather than one because it is a frequency probe:
+the first cycle sheds the initial transient and the second is what an amplitude
+ratio and a phase lag can be read off. `plane3d_figure8` is bound by settling
+rather than by laps, since its 38-step time constant is the longest in the
+aircraft family.
+
+The process plants were left alone. They cost 3 to 600 s each to record, so
+nothing is bought by trimming them, and the four that look like outliers on the
+tau ratio -- the reactor, the boiler drum, the turbine and the battery -- are the
+ones whose output answers the actuator within a step or two, where section 6
+already says the ratio means nothing and the episode is set by the disturbance
+timescale instead.
 
 ### A second, separate shortfall: slow dynamics that never move
 

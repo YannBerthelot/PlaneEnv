@@ -81,14 +81,16 @@ extra_javascript:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
+  - Target MDPs: target-mdp.md
   - Environments:
       - Overview: environments.md
       - Aircraft:
           - Plane: environments/plane.md
-          - Plane Steps: environments/plane_steps.md
           - Plane Sine: environments/plane_sine.md
+          - Plane Energy: environments/plane_energy.md
           - Plane3D Heading: environments/plane3d_heading.md
           - Plane3D Circle: environments/plane3d_circle.md
+          - Plane3D Racetrack: environments/plane3d_racetrack.md
           - Plane3D Figure8: environments/plane3d_figure8.md
           - Patrol: environments/patrol.md
           - Patrol Bearing Only: environments/patrol_bearing_only.md
@@ -111,6 +113,7 @@ nav:
       - Baselines: baselines.md
       - RL protocol: rl-protocol.md
       - RL results: rl-baselines.md
+      - Certainty-equivalence study: certainty-equivalence-study.md
   - Trusting the numbers:
       - Physics methodology: PHYSICS_METHODOLOGY.md
       - Model review checklist: model-review-checklist.md

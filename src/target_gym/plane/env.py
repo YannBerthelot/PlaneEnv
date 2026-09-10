@@ -182,12 +182,34 @@ class PlaneParams(EnvParams):
     #   2  ramp      a constant climb or descent rate
     #   3  sinusoid  a continuous oscillation about the sampled altitude
     #   4  chirp     a sinusoid whose frequency rises through the episode
+    # Weight on an airspeed target, alongside the altitude one. Zero -- the
+    # default -- leaves the task exactly as it was, tracking altitude alone.
+    #
+    # Above zero it becomes the energy-management problem the aircraft has
+    # always physically had and never been scored on. It carries two actuators,
+    # thrust and elevator, against one objective, so a controller has a spare
+    # degree of freedom and can trade airspeed for altitude freely. Scoring both
+    # removes it: thrust is finite, so climbing and accelerating compete, and
+    # the exchange between them is precisely the phugoid.
+    speed_weight: float = 0.0
+    target_speed: float = 230.0  # m/s, the cruise the airspeed channel holds
+    speed_precision_floor: float = 0.5  # m/s, air-data resolution
+    speed_envelope: float = 60.0  # m/s, the error at which the term reaches zero
     target_pattern: int = 0
     target_amplitude: float = 800.0  # m, half-range of the moving patterns
     target_period: float = 240.0  # s, one cycle of the sinusoid
     target_steps: int = 4  # how many treads in the staircase
     target_chirp_octaves: float = 2.0  # frequency multiple across a chirp
     initial_altitude_range: Tuple[float, float] = (3_000.0, 8_000.0)
+    #: How far from the commanded altitude the episode may start. The initial
+    #: altitude used to be drawn independently of the target over the same
+    #: 5 000 m band, so the expected gap was 1 667 m and could reach 5 000 m --
+    #: minutes of open-loop climb at the aircraft's climb rate before any
+    #: tracking began, and on a short clip that was the entire episode. Drawing
+    #: it around the target instead keeps the sampling varied while making the
+    #: episode about holding the altitude, which is what the reward scores.
+    #: ``initial_altitude_range`` still bounds the result.
+    initial_altitude_offset_range: Tuple[float, float] = (-600.0, 600.0)
     initial_z_dot: float = 0.0
     initial_x_dot: float = 200.0
     initial_theta_dot: float = 0.0
@@ -256,7 +278,14 @@ def check_no_nan(x, id=None):
 
 
 def compute_reward(state: PlaneState, params: PlaneParams, xp=jnp):
-    """Return reward for a given state. Safe for JIT."""
+    """Log-scaled altitude tracking, optionally coupled to an airspeed hold.
+
+    One over the commanded altitude when it is held exactly, decaying so that
+    every halving of the error is worth the same. When ``speed_weight`` is
+    above zero the airspeed term multiplies it, so the two must be satisfied
+    together; at ``speed_weight = 0`` the factor is exactly 1.0 and the task is
+    altitude alone. Safe for JIT.
+    """
     xp = jnp
     # Log-scaled tracking: every halving of the error is worth the same, so
     # holding 1 m is rewarded over 2 m exactly as much as 100 m is over 200 m.
@@ -275,11 +304,29 @@ def compute_reward(state: PlaneState, params: PlaneParams, xp=jnp):
     # large negative spike bought nothing the forgone reward did not, and
     # left this family on a different contract from the twelve process
     # plants, which have always relied on forgone reward alone.
-    return tracking
+    #
+    # Airspeed, when it is being scored, multiplies rather than adds -- the
+    # convention every environment here follows. Holding the speed while
+    # abandoning the altitude earns nothing, which is the point: the two are
+    # one objective the aircraft must satisfy together, not two it can pick
+    # between. At speed_weight = 0 this is exactly 1.0 and the task is
+    # unchanged.
+    speed = xp.sqrt(state.x_dot**2 + state.z_dot**2)
+    speed_term = log_scaled_reward(
+        xp.abs(params.target_speed - speed),
+        params.speed_precision_floor,
+        params.speed_envelope,
+        xp,
+    )
+    return tracking * (1.0 - params.speed_weight * (1.0 - speed_term))
 
 
-def get_obs(state: PlaneState, xp=jnp):
+def get_obs(state: PlaneState, params: PlaneParams = None, xp=jnp):
     """Applies observation function to state."""
+    params_target_speed = jnp.asarray(
+        PlaneParams().target_speed if params is None else params.target_speed,
+        dtype=jnp.float32,
+    )
     return xp.stack(
         [
             state.x_dot,
@@ -291,6 +338,13 @@ def get_obs(state: PlaneState, xp=jnp):
             state.target_altitude,
             state.power,
             state.stick,
+            # Commanded airspeed, appended rather than inserted. Putting it
+            # beside target_altitude would have shifted power and stick from
+            # indices 7 and 8 to 8 and 9, silently breaking every consumer that
+            # reads the observation positionally -- the PIDs do. It is present
+            # whether or not it is scored, so the shape does not depend on a
+            # reward weight.
+            params_target_speed,
         ]
     )
 
@@ -298,6 +352,12 @@ def get_obs(state: PlaneState, xp=jnp):
 @partial(jax.jit, static_argnames=["min", "max"])
 def clip_acceleration(a: jnp.ndarray, min: tuple, max: tuple):
     return jnp.clip(a, min=jnp.array(min), max=jnp.array(max))
+
+
+#: The levels the ``steps`` pattern walks, as fractions of ``target_amplitude``.
+#: Eight of them, so the schedule does not repeat inside an episode, with
+#: adjacent changes between 0.2 and 0.8 of the amplitude.
+_STEP_LEVELS = jnp.array([0.0, 0.5, 0.1, -0.3, 0.3, -0.5, -0.1, 0.4])
 
 
 def commanded_altitude(base: float, time, params: PlaneParams, xp=jnp):
@@ -317,7 +377,15 @@ def commanded_altitude(base: float, time, params: PlaneParams, xp=jnp):
 
     hold = base
     tread = xp.floor(t / (total / params.target_steps))
-    steps = base + span * (xp.mod(tread, 2.0) * 2.0 - 1.0) * 0.6
+    # A ladder of levels, not a square wave. Alternating between two altitudes
+    # is a wave with a flat top, and at the excursion this used to run it read
+    # as an aircraft being thrown between two extremes rather than an aircraft
+    # being given new levels to hold. The ladder revisits neither level nor
+    # direction on a two-tread cycle, so consecutive changes differ in size and
+    # sign the way a real clearance sequence does, and the largest adjacent
+    # change is 0.8 of the amplitude rather than 1.2.
+    idx = xp.asarray(xp.mod(tread, float(len(_STEP_LEVELS))), dtype=jnp.int32)
+    steps = base + span * _STEP_LEVELS[idx]
     ramp = base + span * (2.0 * t / total - 1.0)
     sine = base + span * xp.sin(2.0 * xp.pi * t / params.target_period)
     rate = 1.0 + (params.target_chirp_octaves - 1.0) * (t / total)

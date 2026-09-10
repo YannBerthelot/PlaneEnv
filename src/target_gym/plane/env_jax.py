@@ -16,9 +16,11 @@ from target_gym.plane.env import (
     get_obs,
 )
 
-# The console renderer, on the shared instrument kit the plants use. The older
-# pygame scene is kept in rendering.py: it is far faster per frame, so it stays
-# available for anyone rendering long episodes interactively.
+# Both panels come from target_gym.render_aircraft, the kit every aircraft
+# environment draws with. There used to be a second, older pygame scene in
+# rendering.py, kept on the grounds that it was faster per frame; nothing
+# imported it, and once the aircraft renderers were unified it was drawing in a
+# style that matched nothing else shipped, so it is gone.
 from target_gym.plane.rendering_console import _render
 from target_gym.utils import compute_norm_from_coordinates, save_video
 
@@ -26,6 +28,8 @@ from target_gym.utils import compute_norm_from_coordinates, save_video
 class Airplane2D(environment.Environment[PlaneState, PlaneParams]):
     """
     JAX-compatible 2D airplane environment.
+
+    Action (2,): [power, stick], raw in [-1, 1]
     """
 
     render_plane = classmethod(_render)
@@ -42,7 +46,10 @@ class Airplane2D(environment.Environment[PlaneState, PlaneParams]):
         # observe_wind=True  -> wind (wind_x, wind_z) is appended to the obs
         #                       (a fully-observable baseline / feedforward case).
         self.observe_wind = observe_wind
-        self.obs_shape = (11,) if observe_wind else (9,)
+        # Ten, not nine: the commanded airspeed is appended to the
+        # observation whether or not it is being scored, so the shape does not
+        # depend on a reward weight. Twelve with the wind sensor.
+        self.obs_shape = (12,) if observe_wind else (10,)
         self.positions_history = []
         self.integration_method = integration_method
 
@@ -109,10 +116,20 @@ class Airplane2D(environment.Environment[PlaneState, PlaneParams]):
         key, altitude_key, target_key = jax.random.split(key, 3)
 
         initial_x = 0.0
-        initial_z = jax.random.uniform(
-            altitude_key,
-            minval=params.initial_altitude_range[0],
-            maxval=params.initial_altitude_range[1],
+        target_altitude = jax.random.uniform(
+            target_key,
+            minval=params.target_altitude_range[0],
+            maxval=params.target_altitude_range[1],
+        )
+        initial_z = jnp.clip(
+            target_altitude
+            + jax.random.uniform(
+                altitude_key,
+                minval=params.initial_altitude_offset_range[0],
+                maxval=params.initial_altitude_offset_range[1],
+            ),
+            params.initial_altitude_range[0],
+            params.initial_altitude_range[1],
         )
         initial_z_dot = params.initial_z_dot
         initial_x_dot = params.initial_x_dot
@@ -135,12 +152,6 @@ class Airplane2D(environment.Environment[PlaneState, PlaneParams]):
         initial_power = params.initial_power
         initial_stick = jnp.deg2rad(params.initial_stick)
         initial_fuel = params.initial_fuel_quantity
-
-        target_altitude = jax.random.uniform(
-            target_key,
-            minval=params.target_altitude_range[0],
-            maxval=params.target_altitude_range[1],
-        )
 
         state = PlaneState(
             x=initial_x,
@@ -170,7 +181,7 @@ class Airplane2D(environment.Environment[PlaneState, PlaneParams]):
         Observation vector. When ``observe_wind`` is set, the wind components
         (wind_x, wind_z) are appended so the disturbance is fully observable.
         """
-        obs = get_obs(state, xp=jnp)
+        obs = get_obs(state, params, xp=jnp)
         if self.observe_wind:
             if params is None:
                 params = self.default_params

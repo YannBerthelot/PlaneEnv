@@ -608,9 +608,27 @@ def draw_strip(ax, s: Strip, *, legend=True):
 
 
 def format_clock(seconds: float) -> str:
+    """Elapsed *simulated* time, with the units written out.
+
+    Colon-separated ``00:13:18`` is ambiguous on a still frame, and on a clip
+    it is actively misleading. These videos are heavily time-lapsed: a 3D
+    aircraft episode is 800 s subsampled to 400 frames and played at 30 fps,
+    which is 60x real time, so the minutes field advances once per second of
+    playback and reads exactly like a seconds counter. A four-minute airliner
+    circuit then looks like a four-second aerobatic one, which is what
+    prompted this. Spelling the units out removes the inference.
+
+    No "T+" prefix: the units already say this is a duration, and every
+    caller shows it beside a step counter or under a "Sim time" label, so
+    the mission-elapsed notation was decoration.
+    """
     hrs, rem = divmod(float(seconds), 3600)
     mins, secs = divmod(rem, 60)
-    return f"T+{int(hrs):02d}:{int(mins):02d}:{int(secs):02d}"
+    if hrs >= 1:
+        return f"{int(hrs)}h {int(mins):02d}m {int(secs):02d}s"
+    if mins >= 1:
+        return f"{int(mins)}m {int(secs):02d}s"
+    return f"{int(secs)}s"
 
 
 def frame(
@@ -741,15 +759,62 @@ def finish(fig) -> np.ndarray:
     return image
 
 
-def make_render_hook(render_fn, history_keys, *, stride=10):
+# Frames rendered per clip, before ``utils.save_video`` halves them: it builds
+# the sequence at 60 fps and writes the GIF at 30, so ~200 rendered frames
+# become ~100 in the file. At the 10 fps those are re-timed to by
+# ``runners.video``, that is a ten-second clip. It was 90, which after the
+# halving left 46 frames played at 33 fps: the whole episode was over in 1.4 s.
+#: Frames a gallery clip aims for. At the 10 fps the clips play back at this is
+#: ten seconds, which matches the aircraft clips and the gallery this suite
+#: shipped before. It read 200 while ``utils.save_video`` built at 60 fps and
+#: wrote at 30, so moviepy dropped every other frame and 200 became 100; with
+#: that halving fixed in ``runners.video`` the number has to say 100 itself,
+#: or every process clip doubles in length and in bytes.
+TARGET_FRAMES = 100
+
+
+def frame_stride(params, target_frames: int = TARGET_FRAMES, time_step: int = 1) -> int:
+    """How many steps to skip between frames, for a clip of a readable length.
+
+    A fixed stride cannot work across this suite, because episode lengths span
+    three orders of magnitude and ``runners._media_params`` rescales them again.
+    The reactor is the case that proved it: its hook used ``stride=48``, chosen
+    for the 86 400-step day-long episode, while media hands it 1200 steps, so a
+    whole clip came out as two frames. Deriving the stride from the episode
+    keeps every environment near the same clip length, which is also roughly
+    what the shipped gallery already runs at, 80 to 110 frames.
+
+    ``time_step`` is how far ``state.time`` moves per call, which is not always
+    one: the reactor advances a whole control period of ten physics steps per
+    environment step, so a 1 200-step episode is only 120 calls. Dividing the
+    episode by the frame target without accounting for that gave a stride
+    coarser than the spacing between calls, and the clip was five frames.
+
+    The returned stride is a multiple of ``time_step``, so it always lands on
+    values ``state.time`` actually takes.
+    """
+    steps = int(getattr(params, "max_steps_in_episode", target_frames))
+    time_step = max(1, int(time_step))
+    calls = max(1, steps // time_step)
+    every = max(1, round(calls / max(target_frames, 1)))
+    return every * time_step
+
+
+def make_render_hook(render_fn, history_keys, *, stride=None):
     """Build the ``_render(cls, screen, state, params, frames, clock)`` adapter.
 
     Every environment's hook is the same shape, so it is generated rather than
     copied: reset the history when a new episode starts, call *render_fn* every
     *stride* steps, and append the frame.
+
+    ``stride=None``, the default, derives it per episode via
+    :func:`frame_stride`. Pass a number only to pin an environment to a fixed
+    sampling regardless of episode length.
     """
 
     def _render(cls, screen, state, params, frames, clock, stride=stride):
+        if stride is None:
+            stride = frame_stride(params)
         if state is None:
             state = getattr(cls, "state", None)
             if state is None:

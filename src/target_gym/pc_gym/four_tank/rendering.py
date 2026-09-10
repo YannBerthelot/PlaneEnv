@@ -201,4 +201,4 @@ def render_four_tank(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_four_tank, HISTORY_KEYS, stride=10)
+_render = rk.make_render_hook(render_four_tank, HISTORY_KEYS)

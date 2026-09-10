@@ -150,4 +150,4 @@ def render_first_order(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_first_order, HISTORY_KEYS, stride=10)
+_render = rk.make_render_hook(render_first_order, HISTORY_KEYS)

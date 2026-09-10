@@ -115,11 +115,18 @@ def gym_wrapper_factory(jax_env_class: Type):
             self.frames = frames
 
             if self.render_mode == "human":
-                import pygame
+                # Only the renderers that open a pygame window hand a screen
+                # back; the ones rebuilt on the shared instrument kit draw to
+                # an image and return None. Pumping an uninitialised video
+                # system raises, so an environment whose renderer never opened
+                # a window is not asked about its events -- ``render()`` still
+                # produces the frame, it just does not display it live.
+                if self.screen is not None:
+                    import pygame
 
-                pygame.event.pump()
-                if self.clock:
-                    self.clock.tick(self.metadata["render_fps"])
+                    pygame.event.pump()
+                    if self.clock:
+                        self.clock.tick(self.metadata["render_fps"])
                 return None
             elif self.render_mode in ["rgb_array", "rgb_array_list"]:
                 return self.frames[-1] if self.frames else None

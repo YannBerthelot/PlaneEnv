@@ -252,8 +252,33 @@ def figure_pid(name: str, params=None, n_seeds: int = 6, plot: bool = True):
     return runs
 
 
+#: Playback rate for the gallery clips. Ten, not the 30 the GIF was written at.
+#: These are heavily time-lapsed already -- a 3D aircraft episode is 800 s of
+#: flight -- so the constraint is legibility, not smoothness.
+GIF_FPS = 10
+
+
 _MEDIA_MIN_STEPS = 600
 _MEDIA_MAX_STEPS = 1200
+
+#: Environments whose motion is meant to be read as motion, and the clip's
+#: playback speed for them.
+#:
+#: For these the clip shows the *opening* of an episode at a fixed speed-up
+#: rather than a whole episode time-lapsed. An aircraft episode is 800 s of
+#: flight; squeezed into a 200-frame clip at 10 fps it played at forty times
+#: real time, which reads as an aerobatic display rather than an airliner on
+#: 8 km lobes. Ten seconds of flight per second of playback is fast enough to
+#: show a full turn and slow enough that the attitude changes are legible.
+#:
+#: The process environments deliberately keep the full-episode time-lapse.
+#: Their subject is a setpoint change playing out over twenty minutes or six
+#: hours, and the first ten seconds of one says nothing at all. The point of a
+#: gallery clip is to convey the task, and for those the task *is* the whole
+#: episode.
+_MEDIA_REALTIME_GROUPS = ("plane", "patrol")
+MEDIA_SPEEDUP = 10.0
+MEDIA_SECONDS = 10.0
 
 
 def _media_params(spec):
@@ -275,10 +300,69 @@ def _media_params(spec):
     # Long enough to be worth watching, short enough to stay readable: the
     # aircraft's own default is 10 000 steps, which is 41 cycles of the sinusoid
     # and unwatchable, while the benchmark's 280 is over before the climb ends.
-    target = min(max(steps, _MEDIA_MIN_STEPS), default_steps, _MEDIA_MAX_STEPS)
+    #
+    # Take the longer of the two lengths, *then* bound it. This used to read
+    # ``min(max(steps, MIN), default_steps, MAX)``, which applied the floor and
+    # then let ``default_steps`` undo it: every environment whose own default is
+    # under 600 got a clip shorter than the floor exists to prevent. The CSTR
+    # default is 100, so its clip was 100 steps, which at the renderer's stride
+    # is five frames. The committed gallery still holds an 80-frame CSTR clip
+    # from before this regressed, so the shipped videos and the code that makes
+    # them had silently stopped agreeing.
+    target = int(np.clip(max(steps, default_steps), _MEDIA_MIN_STEPS, _MEDIA_MAX_STEPS))
     if target != steps:
         params = params.replace(max_steps_in_episode=target)
     return params
+
+
+def _clip_params(spec):
+    """Parameters for a gallery clip, which is not the same as for a figure.
+
+    A figure wants the whole episode: it is a record of what the controller did
+    from start to finish. A clip wants whatever length reads best as a moving
+    picture, and for the environments in ``_MEDIA_REALTIME_GROUPS`` that is a
+    short opening at a fixed speed rather than the episode compressed to fit.
+    """
+    params = _media_params(spec)
+    if not spec.name.startswith(_MEDIA_REALTIME_GROUPS):
+        return params
+    # One rendered frame per simulated step, so the speed-up is delta_t times
+    # the frame rate and the length is however many steps fill MEDIA_SECONDS of
+    # playback. The renderer's own frame_stride comes out at ``stride`` for
+    # this length, which is what makes the arithmetic hold.
+    dt = float(getattr(params, "delta_t", 1.0))
+    stride = max(1, round(MEDIA_SPEEDUP / (dt * GIF_FPS)))
+    steps = int(round(MEDIA_SECONDS * GIF_FPS * stride))
+
+    # A task whose setpoint moves needs the clip to contain a change, or it
+    # shows an aircraft holding a level and says nothing about what is being
+    # asked of it. Ten times real time covers 100 s; a level lasts 300 s. So
+    # the clip is lengthened to two of them and the speed-up rises to suit --
+    # the aircraft is pinned mid-panel in these views and has no attitude to
+    # misread, which is what made a fast time-lapse unwatchable on the 3D tasks.
+    pattern = int(getattr(params, "target_pattern", 0))
+    overrides = {}
+    if pattern == 1:
+        # The ladder's tread is the episode divided by ``target_steps``, so
+        # simply shortening the episode would compress the schedule and show a
+        # faster sequence of levels than the environment ever asks for. Scaling
+        # ``target_steps`` with the clip keeps each tread the length it really
+        # has, and the clip is then a window onto the task rather than a
+        # different one.
+        spec_params = spec.make_test_params()
+        tread = float(spec_params.max_steps_in_episode) / max(
+            float(getattr(spec_params, "target_steps", 1.0)), 1.0
+        )
+        steps = max(steps, int(round(2.0 * tread)))
+        overrides["target_steps"] = max(1, int(round(steps / tread)))
+    elif pattern in (3, 4):
+        # The sinusoid and the chirp are written against ``target_period`` in
+        # seconds, so they keep their shape whatever the episode length.
+        period = float(getattr(params, "target_period", 0.0))
+        if period > 0:
+            steps = max(steps, int(round(2.0 * period / dt)))
+
+    return params.replace(max_steps_in_episode=steps, **overrides)
 
 
 def figure_comparison(name: str, params=None, n_seeds: int = 5, plot: bool = True):
@@ -349,6 +433,36 @@ def _save(fig, stem: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def retime_gif(path: str, fps: int = GIF_FPS) -> str:
+    """Rewrite a GIF's frame delays in place, leaving the frames alone.
+
+    Duration is frames over fps, and only one of those costs anything. Adding
+    frames grows the file linearly and permanently, since these live in git
+    history; slowing the playback is free. Measured on a plane clip, 46 frames
+    re-timed from 33 fps to 10 went from 1.4 s to 4.6 s for the same bytes.
+
+    Done here rather than in ``utils.save_video`` deliberately. ``utils`` is
+    hashed into both ``provenance`` fingerprints, so editing it would mark all
+    nineteen recorded baselines and all twenty-one environment version stamps
+    stale to change a frame delay. This module is in neither.
+    """
+    from PIL import Image, ImageSequence
+
+    with Image.open(path) as im:
+        frames = [f.copy() for f in ImageSequence.Iterator(im)]
+    if not frames:
+        return path
+    frames[0].save(
+        path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=int(round(1000 / max(fps, 1))),
+        loop=0,
+        optimize=True,
+    )
+    return path
+
+
 def video(name: str, params=None, seed: int = 0) -> str | None:
     """Render one PID episode to ``videos/<name>/pid_output.gif``."""
     spec = REGISTRY[name]
@@ -356,15 +470,21 @@ def video(name: str, params=None, seed: int = 0) -> str | None:
     if policy is None:
         return None
     env = spec.make_env()
-    params = params or _media_params(spec)
+    params = params or _clip_params(spec)
     folder = f"{VIDEO_DIR}/{name}"
     os.makedirs(folder, exist_ok=True)
-    written = env.save_video(policy, seed, params=params, folder=folder, format="gif")
+    # FPS=30, matching the rate ``utils.save_video`` passes to ``write_gif``.
+    # Left at its default of 60 the clip is built at 60 and written at 30, and
+    # moviepy drops every other frame -- a 100-step clip came out 49 frames, so
+    # the speed-up was quietly double what the length arithmetic above says.
+    written = env.save_video(
+        policy, seed, params=params, folder=folder, format="gif", FPS=30
+    )
     # save_video names its output episode_000.gif; the gallery and
     # scripts/shorten_gifs.py both expect pid_output.gif.
     final = os.path.join(folder, "pid_output.gif")
     os.replace(written, final)
-    return final
+    return retime_gif(final)
 
 
 # ---------------------------------------------------------------------------

@@ -323,4 +323,4 @@ def render_glass_furnace(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_glass_furnace, HISTORY_KEYS, stride=10)
+_render = rk.make_render_hook(render_glass_furnace, HISTORY_KEYS)

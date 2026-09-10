@@ -98,8 +98,10 @@ eigenvalue is `|λ| ≈ (L+V)/M ≈ 11.8 min⁻¹`. RK4 is stable only for
 | **16** | **0.74** | yD = 0.99000, xB = 0.01001 ✅ |
 
 The reference implementations use adaptive implicit solvers, which hides this.
-It costs throughput: **≈ 0.65 M steps/s**, the slowest environment in the
-library — 41 states × 64 RHS evaluations per step. The fast modes are
+It costs throughput -- 41 states by 64 RHS evaluations per step makes this one
+of the two or three most expensive environments here, and which one is *the*
+most expensive depends on the batch size, so see
+[docs/performance.md](../../../docs/performance.md) rather than a claim here. The fast modes are
 individual tray holdups (~10 s residence) while the profile of interest evolves
 over ~194 min, so this is stiffness, and an implicit integrator would be the
 way to buy it back.

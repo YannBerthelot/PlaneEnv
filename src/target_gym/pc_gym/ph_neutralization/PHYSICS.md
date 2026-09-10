@@ -126,8 +126,10 @@ speciation, so `Wa`, `Wb` and the buffer flow are hidden.
 | PID | 258.0 | 0.085 pH |
 | constant valve | 7.3 | 0.885 pH |
 
-Throughput ≈ 2.1 M steps/s — the bisection dominates, and is the price of
-having the nonlinearity be exact rather than approximated.
+The bisection dominates the step cost, and is the price of having the
+nonlinearity be exact rather than approximated. Its step count was cut from 44
+to 20 on measurement, which roughly doubled throughput; see
+[docs/performance.md](../../../docs/performance.md).
 
 **The MPC objective is a quadratic in the error, not a copy of the reward.**
 This is worth stating because getting it wrong failed in *both* directions

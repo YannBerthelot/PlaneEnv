@@ -177,8 +177,11 @@ precision the reward was paying for. It is the same failure as check 11 of the
 model review checklist, one level down: there the *metric* could not see what the
 reward asked for, here the *integrator* could not.
 
-It costs throughput, measured at batch 4096: the 3D aircraft goes from 1.88 to
-1.05 M steps/s and the 2D aircraft from 2.71 to 1.61. The 2D aircraft's own
+It costs throughput: measured at batch 4096 when the change was made, the 3D
+aircraft went from 1.88 to 1.05 M steps/s and the 2D aircraft from 2.71 to 1.61.
+Those are the numbers that justified the trade; current figures on whatever
+machine you are reading this from are in
+[docs/performance.md](../../docs/performance.md). The 2D aircraft's own
 error at one substep was 0.823 m, inside its 1 m floor rather than outside it,
 but it is set the same way so the family stays consistent.
 

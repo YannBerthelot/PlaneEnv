@@ -31,7 +31,8 @@ target and then hold it**, instead of reaching a goal once and stopping. Most
 industrial control works that way. You keep a setpoint against disturbances,
 indefinitely.
 
-They are fast (0.5-17 M steps/s on CPU) and end-to-end GPU compatible, with
+They are fast (0.6 to 700 M steps/s on CPU, see
+[docs/performance.md](docs/performance.md)) and end-to-end GPU compatible, with
 `jit`/`vmap`/`scan` throughout. Their physics is a **documented, tested
 contract**: every environment carries a `PHYSICS.md` with a sourced parameter
 table, published validation targets asserted by tests, and quantified known

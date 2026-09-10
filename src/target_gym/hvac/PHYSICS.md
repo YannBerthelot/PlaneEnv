@@ -180,9 +180,11 @@ recovery and coasting on forecast solar rather than reacting to it. It accepts
 slightly looser comfort (1.72 vs 1.38 °C MAE) for a large energy saving, which
 is exactly the trade the reward asks for.
 
-Throughput: **17.7 M steps/s** — two differential states with closed-form
-algebraic nodes make this one of the cheapest environments in the library,
-second only to CSTR.
+**Cheap to step**: one differential state with closed-form algebraic nodes,
+which is what the 5R1C reduction buys. See
+[docs/performance.md](../../../docs/performance.md) for measured throughput --
+it depends on the machine and the batch size, so it is measured in one place
+rather than claimed in fifteen.
 
 ---
 

@@ -151,8 +151,11 @@ discharge assay. The axial profile is hidden.
 | Cascade PID | 163 – 180 | 0.076 – 0.108 pp | 0.2 |
 | best constant action | 37 | — | — |
 
-Throughput ≈ 0.65 M steps/s — the slowest environment in the suite, and
-honestly so: 64 coupled states with a sequential gas sweep.
+Expensive to step, honestly so: 64 coupled states with a sequential gas sweep.
+Measured throughput is in [docs/performance.md](../../docs/performance.md); it
+moves with the batch size, and the superlative this line used to carry ("the
+slowest environment in the suite") was contradicted by the distillation column
+claiming the same thing, with the true answer depending on the batch.
 
 **Cascade is the right PID structure**, and for a structural reason. The inner
 loop puts fuel on the burning-zone pyrometer, which is fast and carries no

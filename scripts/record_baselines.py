@@ -94,20 +94,24 @@ def main() -> int:
     ap.add_argument("--envs", nargs="*", default=None, help="default: all with an MPC")
     args = ap.parse_args()
 
-    existing = {}
-    if BASELINES_PATH.exists():
-        existing = json.loads(BASELINES_PATH.read_text())
-
     names = args.envs or [
         n for n, s in REGISTRY.items() if s.has_pid and s.make_mpc is not None
     ]
-    out = dict(existing)
+    # Only this run's rows are collected here; the file is re-read at write
+    # time and these are merged onto whatever it holds *then*. A run takes
+    # tens of minutes, and reading the file at startup meant a second run --
+    # a forgotten `--envs` job left going in another terminal -- would write
+    # its hour-old snapshot over every row recorded in the meantime, silently
+    # reverting them. That happened here: a stale two-environment job from an
+    # earlier session was still running, 1h49m in, and would have reverted a
+    # full twenty-environment re-record on finishing.
+    rows: dict[str, dict] = {}
     for name in names:
         row = record(name)
         if row is None:
             print(f"  {name:20s} no MPC baseline, skipped", flush=True)
             continue
-        out[name] = row
+        rows[name] = row
         p, m = np.mean(row["pid_returns"]), np.mean(row["mpc_returns"])
         verdict = "MPC leads" if m >= p else f"PID leads by {p - m:.1f}"
         print(
@@ -116,6 +120,10 @@ def main() -> int:
             flush=True,
         )
 
+    out = {}
+    if BASELINES_PATH.exists():
+        out = json.loads(BASELINES_PATH.read_text())
+    out.update(rows)
     out["_meta"] = {
         "generated": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "seeds": SEEDS,

@@ -56,6 +56,7 @@ RL_RESULTS_PATH = _REPO / "data" / "rl_results.json"
 #: when it is written rather than when someone reads it into a table.
 REQUIRED_FIELDS = (
     "env",
+    "env_version",
     "algorithm",
     "library",
     "env_fingerprint",
@@ -107,6 +108,11 @@ def record_result(
 
     record = {
         "env": env,
+        # The citable identity, alongside the registry key. A published result
+        # belongs to a *version* of an environment: the key says which entry it
+        # came from, this says what that entry meant when the number was
+        # measured, and the fingerprint below is what proves the two agree.
+        "env_version": REGISTRY[env].versioned_name,
         "algorithm": algorithm,
         "library": library,
         "library_version": library_version,

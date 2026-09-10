@@ -21,6 +21,11 @@ from target_gym.utils import save_video
 
 
 class FirstOrderSystem(environment.Environment[FirstOrderState, FirstOrderParams]):
+    """First-order lag: the simplest target MDP in the suite.
+
+    Action (1,): [input], raw in [-1, 1] -> [u_min, u_max]
+    """
+
     render_car = classmethod(_render)
     screen_width = 600
     screen_height = 400

@@ -26,7 +26,12 @@ from target_gym.pc_gym.ph_neutralization.env_jax import PHNeutralization
 from target_gym.plane.env import PlaneParams
 from target_gym.plane.env_jax import Airplane2D
 from target_gym.plane3d.env import PlaneParams3D
-from target_gym.plane3d.env_jax import Plane3DCircle, Plane3DFigureEight, Plane3DHeading
+from target_gym.plane3d.env_jax import (
+    Plane3DCircle,
+    Plane3DFigureEight,
+    Plane3DHeading,
+    Plane3DRacetrack,
+)
 from target_gym.reactor.env import ReactorParams
 from target_gym.reactor.env_jax import Reactor
 from target_gym.wrapper import gym_wrapper_factory
@@ -54,6 +59,7 @@ __all__ = (
     "Plane3D",
     "Plane3DHeading",
     "Plane3DCircle",
+    "Plane3DRacetrack",
     "Plane3DFigureEight",
     "PlaneParams3D",
     # Close patrol (formation-keeping)

@@ -21,6 +21,11 @@ from target_gym.utils import save_video
 
 
 class CSTR(environment.Environment[CSTRState, CSTRParams]):
+    """Exothermic CSTR holding concentration against runaway.
+
+    Action (1,): [coolant temperature], raw in [-1, 1] -> [T_c_min, T_c_max]
+    """
+
     render_car = classmethod(_render)
     screen_width = 600
     screen_height = 400

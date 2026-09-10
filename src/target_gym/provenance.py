@@ -139,7 +139,14 @@ def _env_sources(spec) -> list[pathlib.Path]:
     directory = _ROOT.parent / pathlib.Path(*package.split("."))
     if not directory.is_dir():
         return []
-    return [p for p in sorted(directory.glob("*.py")) if p.name != "rendering.py"]
+    # Any rendering module, not just the one named exactly "rendering.py".
+    # Drawing code cannot change a return, so hashing it only produces false
+    # stales; the 2D aircraft's second renderer, rendering_console.py, was
+    # being hashed purely because the filter matched on an exact filename
+    # rather than on the role.
+    return [
+        p for p in sorted(directory.glob("*.py")) if not p.name.startswith("rendering")
+    ]
 
 
 def baseline_fingerprint(spec) -> str:

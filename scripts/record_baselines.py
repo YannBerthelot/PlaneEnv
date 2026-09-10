@@ -124,6 +124,18 @@ def main() -> int:
     if BASELINES_PATH.exists():
         out = json.loads(BASELINES_PATH.read_text())
     out.update(rows)
+
+    # Drop rows for environments the registry no longer has. Without this a
+    # removed environment leaves a fossil for ever: the merge above preserves
+    # whatever the file already held, which is what makes a partial re-record
+    # safe, and is exactly why nothing ever cleans up. ``plane_steps`` sat in
+    # here after being absorbed into ``plane_energy``, describing a task that
+    # cannot be constructed.
+    dead = [k for k in out if k != "_meta" and k not in REGISTRY]
+    for k in dead:
+        del out[k]
+        print(f"  dropped {k}: no longer in the registry", flush=True)
+
     out["_meta"] = {
         "generated": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
         "seeds": SEEDS,

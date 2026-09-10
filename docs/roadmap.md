@@ -131,6 +131,33 @@ what is broken and recorded rather than hidden.
         command limit, and worse tracking. The roll gains are held, and the
         whole improvement is in the cross-track gain.
 
+      **Presentation, before anyone looks at it:**
+
+      - [ ] **The media is stale.** All 40 gifs were rendered on 2026-09-09,
+        and 25 environment modules have changed since -- including two whose
+        *task* changed, not just their internals. The battery clips show a
+        dispatch signal that no longer exists (an OU random walk, now a
+        schedule of 300 s market blocks) and the patrol clips show a lead
+        holding one constant turn rate (now a routed circuit of eight legs).
+        Those two are showing behaviour the library no longer has, which is
+        worse than being merely out of date. Regenerate with `make videos`,
+        then `make short-gifs`, and rebuild the gallery mosaics. Do it *after*
+        the final baseline record, so the media and the numbers describe the
+        same tree, and check the aircraft clips in particular since the
+        renderer was reworked in the same window.
+      - [ ] **The README is too long.** 410 lines and 3199 words across
+        fourteen top-level sections, which is a document rather than a landing
+        page: a reader deciding whether this library is for them has to scroll
+        past physics validation, performance benchmarks and related projects
+        before reaching anything actionable. Most of it already exists in
+        `docs/`, so the fix is mostly deletion and linking, not rewriting.
+        Keep what answers "what is this, why would I use it, how do I start":
+        the gallery, one paragraph of positioning, install, quickstart, the
+        environment table, and the baselines claim. Move physics validation,
+        performance, related projects and the roadmap summary out to the pages
+        that already carry them. Worth doing once the docs site is live, since
+        that is what makes linking out cheap.
+
       **Worth doing, cheap:**
 
       - [x] A Colab or notebook linked from the README. Done:

@@ -1,8 +1,8 @@
 {
   "battery-v1": {
-    "fingerprint": "2c738107c42f2628",
+    "fingerprint": "ca08a637305bc642",
     "note": "re-stamped without a note",
-    "stamped": "2026-09-10T09:54:54+00:00"
+    "stamped": "2026-09-10T17:56:05+00:00"
   },
   "boiler_drum-v1": {
     "fingerprint": "f594bdede5b4e0d1",
@@ -45,14 +45,14 @@
     "stamped": "2026-09-10T07:38:30+00:00"
   },
   "patrol-v1": {
-    "fingerprint": "df53318255befae7",
+    "fingerprint": "96b9deebac83bd98",
     "note": "re-stamped without a note",
-    "stamped": "2026-09-10T09:54:54+00:00"
+    "stamped": "2026-09-10T23:12:20+00:00"
   },
   "patrol_bearing_only-v1": {
-    "fingerprint": "df53318255befae7",
+    "fingerprint": "96b9deebac83bd98",
     "note": "re-stamped without a note",
-    "stamped": "2026-09-10T09:54:54+00:00"
+    "stamped": "2026-09-10T23:12:20+00:00"
   },
   "ph_neutralization-v1": {
     "fingerprint": "31518903ea8a4fe8",

@@ -45,6 +45,34 @@ from target_gym.utils import log_scaled_reward
 # ─── State & parameters ─────────────────────────────────
 
 
+#: Legs in the lead's route, cycled. A patrol *is* a repeating circuit: fly a
+#: leg, turn onto the next, fly it, turn again. Eight of them at the default
+#: leg length gives a 200-step episode three turn onsets and a 1500-step one
+#: about twenty-five.
+#:
+#: The lead used to draw one turn rate at reset and hold it for the whole
+#: episode, which made the task unable to measure what it claimed. Tracking a
+#: reference that rotates at a *constant, exactly observable* rate is cancelled
+#: outright by feedforward -- with one added, the follower's settled error went
+#: from 77.8 m at the hardest turn to 2.4 m, against a 3 m reward precision
+#: floor -- and a planner has nothing to anticipate, because the future is a
+#: linear extrapolation of the present at every instant. The shared turbulence
+#: gust does not help either: both aircraft are in the same air mass, so it is
+#: common-mode and cancels in the relative position the reward scores.
+#:
+#: A route puts the difficulty back where the task says it is. Feedforward is
+#: momentarily wrong at every turn onset, which is exactly the lag a follower
+#: should have to work for, and a planner rolling ``step_env`` forward sees the
+#: next turn coming because the schedule is in the state.
+N_LEAD_LEGS = 8
+
+
+def lead_leg(time, params, xp=jnp):
+    """Which leg of the lead's route is being flown at *time*."""
+    per_leg = xp.maximum(params.lead_leg_seconds / params.delta_t, 1.0)
+    return ((time / per_leg).astype(int)) % N_LEAD_LEGS
+
+
 @struct.dataclass
 class PatrolState(EnvState):
     """Combined state of the two aircraft plus the slot definition.
@@ -63,7 +91,11 @@ class PatrolState(EnvState):
     slot_back: float
     slot_right: float
     slot_up: float
-    lead_turn_rate: float  # rad per step commanded onto the lead heading
+    lead_turn_rate: float  # rad per step commanded onto the lead heading, this leg
+    #: Turn rate for each leg of the route, cycled. Held in the state, not
+    #: derived from a key, so a planner that rolls the environment forward can
+    #: read the lead's future out of the state it is handed.
+    lead_turn_schedule: jnp.ndarray
     # Shared formation turbulence gust (m/s): all aircraft are in the same air
     # mass, so they feel one common OU gust on top of the steady params.wind.
     gust_x: float = 0.0
@@ -103,6 +135,10 @@ class PatrolParams(PlaneParams3D):
     # and level.  At delta_t = 1 s, 0.003 rad/step ~ 0.17 deg/s ~ a very gentle
     # standard-rate-ish orbit for an airliner.
     lead_turn_rate_range: Tuple[float, float] = (-0.003, 0.003)
+    #: Seconds the lead holds each leg of its route before turning onto the
+    #: next. 60 s at the 1 s step, so the follower meets a turn onset roughly
+    #: every minute rather than once per episode.
+    lead_leg_seconds: float = 60.0
 
     # Follower is spawned near the slot with this much isotropic position noise
     # (m) so the episode starts solvable but not perfectly trimmed.
@@ -496,6 +532,9 @@ def compute_next_state_patrol(
         follower=new_follower,
         lead=new_lead,
         lead_pid=new_pid,
+        # The leg live at the *next* step, so the rate the lead is commanded
+        # with and the time it is commanded at stay in step.
+        lead_turn_rate=state.lead_turn_schedule[lead_leg(state.time + 1, params)],
         time=state.time + 1,
         gust_x=gust[0],
         gust_y=gust[1],

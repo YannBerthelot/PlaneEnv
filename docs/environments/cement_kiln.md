@@ -53,8 +53,8 @@ Measured over 10 seeds on a 700-step episode (see [Baselines](../baselines.md)):
 
 | controller | return | per step |
 |---|---|---|
-| PID | 605.4 | 0.865 |
-| MPC | 630.4 | 0.901 |
+| PID | 621.5 | 0.888 |
+| MPC | 647.7 | 0.925 |
 
 ## Arguments
 
@@ -74,5 +74,5 @@ Measured over 10 seeds on a 700-step episode (see [Baselines](../baselines.md)):
 | `cp_refractory` | 900 |
 | `U_shell` | 4 |
 | `raw_meal_nominal` | 53.82 |
-| … | 35 more, see the params dataclass |
+| … | 34 more, see the params dataclass |
 

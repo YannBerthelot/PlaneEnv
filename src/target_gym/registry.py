@@ -132,6 +132,11 @@ class EnvSpec:
         The same, for the MPC: set when the MPC exists and runs but returns
         materially less than the PID, so it is not the upper bound the benchmark
         presents it as. The reason should carry the measured numbers.
+    noise_fields:
+        Names of parameters that scale process noise. A planner that rolls the
+        real environment forward gets a copy of the params with these set to
+        zero, so it plans on the mean disturbance instead of one invented
+        realisation of it.
     """
 
     name: str
@@ -154,6 +159,9 @@ class EnvSpec:
     mpc_degraded: str | None = None
     effectiveness_overrides: dict[str, Any] = field(default_factory=dict)
     disturbance_fields: tuple[str, ...] = ()
+    #: Parameters that scale *process* noise, zeroed in the copy of the params
+    #: a planner uses for its internal model. See ``experts.mpc.plan_params``.
+    noise_fields: tuple[str, ...] = ()
     disturbance_overrides: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -572,17 +580,9 @@ _SPECS: tuple[EnvSpec, ...] = (
         env_factory=_patrol,
         params_cls=_LazyParams("target_gym.patrol.env", "PatrolParams"),
         make_pid=_pid("make_patrol_stateful_pid"),
-        make_mpc=None,
+        make_mpc=_mpc("make_patrol_mpc"),
         test_params={"max_steps_in_episode": 200},
         tuned_gains_key="patrol",
-        baselines_note=(
-            "PID present -- a stateful wrapper around the functional pursuit "
-            "expert, which already held formation; what was missing was the "
-            "adapter, not the controller. No MPC yet: the follower's plant is "
-            "the full 3D aircraft and the reference is a *manoeuvring lead*, "
-            "so an MPC needs the lead's future trajectory as a time-varying "
-            "parameter, which is not yet wired."
-        ),
     ),
     EnvSpec(
         name="patrol_bearing_only",
@@ -765,6 +765,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         # 400 steps = 100 s ~ 7 rotor time constants.
         test_params={"max_steps_in_episode": 400},
         tuned_gains_key="wind_turbine",
+        noise_fields=("turbulence_std",),
         disturbance_fields=("v_wind",),
     ),
     EnvSpec(
@@ -778,6 +779,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         # traverse the usable state-of-charge range at full power.
         test_params={"max_steps_in_episode": 360},
         tuned_gains_key="battery",
+        noise_fields=("dispatch_noise_std",),
         mpc_degraded=(
             "This MPC loses to its own PID on 9 of 10 seeds, by 3 to 11 points "
             "each, and its published mean leads only because of seed 0: 350.4 "

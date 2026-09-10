@@ -79,6 +79,34 @@ than by commit.
 
 ### Fixed
 
+- **The MPC could see the future, once every ten seeds.** `GradientMPC` and
+  `SamplingMPC` roll the real environment forward to score a plan, under a
+  hardcoded `jax.random.PRNGKey(0)`, while `rollout` drives the plant with
+  `PRNGKey(seed)`. On seed 0 those coincide, so the planner's simulated
+  disturbance *was* the plant's actual disturbance and the MPC had perfect
+  foresight. On the battery, whose tracked target is the noise, that was worth
+  350.4 against an honest 151.8: a median tracking error of 22 W where the
+  truth is 60 630 W. It inflated seed 0 of every environment with one of those
+  planners, and with it every published mean. Planners now take a copy of the
+  parameters with the fields named in `EnvSpec.noise_fields` zeroed, so they
+  predict the mean disturbance. That is certainty equivalence, and
+  `docs/baselines.md` had already flagged its absence as a caveat.
+- **`plan_params` and `noise_fields` are inside the fingerprint.**
+  `runners/runners.py` and `registry.py` are in neither `_SHARED_SOURCES` nor
+  an environment's own sources, so a change to either altered every MPC number
+  and invalidated no record. `plan_params` now lives in `experts/mpc.py`, which
+  is fingerprinted, and `baseline_fingerprint` hashes `spec.noise_fields`.
+- **The battery task was measuring the dice, not the controller.** Its dispatch
+  target was an Ornstein-Uhlenbeck process whose one-step innovation had a
+  standard deviation of 63.6 kW against a 150 kW tracking band, which puts the
+  best attainable tracking reward at 0.429. The shipped PID scored 0.447 and
+  the MPC 0.430: both were pinned on an irreducible noise floor and the
+  environment could not tell a good controller from a mediocre one. The signal
+  is now a schedule of twelve 300 s dispatch blocks drawn in ±0.8 MW with 2 kW
+  of regulation jitter, which is what a grid battery is actually handed. The
+  PID goes to 262.0 and the MPC to 265.8, from 160.8 and 174.2.
+
+
 - **The MPC solver could hang, and nothing noticed.** IPOPT was left at its
   default of 3000 iterations and no time limit, so a single badly conditioned
   step could run for half an hour while its neighbours took a tenth of a

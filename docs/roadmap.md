@@ -10,7 +10,10 @@ what is broken and recorded rather than hidden.
 * [x] Document and test every environment's physics against published data.
 * [x] Rebuild every renderer on a shared control-room toolkit, and regenerate
       the gallery clips against it.
-* [ ] Restore the Plane Patrol baselines with pursuit guidance (see *Baseline coverage*).
+* [x] Restore the Plane Patrol baselines with pursuit guidance. Done: both
+      variants ship a stateful wrapper around the functional pursuit expert,
+      and `patrol_bearing_only` adds a lead-state estimator in front of the
+      same law. Neither has an MPC yet; see *Baseline coverage*.
 * [ ] Add microburst / spatially-varying wind fields (position-dependent, not just altitude-linear).
 * [ ] Provide benchmark results for popular RL baselines.
 * [ ] Add random orientation variations to circle and heading tasks.
@@ -58,8 +61,11 @@ what is broken and recorded rather than hidden.
         under `caffeinate` so a sleeping machine does not stall them again;
         the 15.5 hours the glass furnace took on the last run is what that
         looks like when it does.
-      - [ ] **Host the documentation.** Needs a Pages deploy job, which does not
-        exist yet, and the repository's Pages source set to GitHub Actions.
+      - [x] **Host the documentation.** Done: `.github/workflows/docs-deploy.yml`
+        builds with `mkdocs build --strict` and deploys via
+        `actions/deploy-pages@v4`, with a `workflow_dispatch` trigger so the
+        site can be published without a commit. The repository's Pages source
+        is set to GitHub Actions.
       - [x] **`CODE_OF_CONDUCT.md`.** Done: Contributor Covenant 2.1
         verbatim, with the maintainer's address as the reporting contact,
         linked from `CONTRIBUTING.md`. Verbatim because it is the text
@@ -384,11 +390,15 @@ what is broken and recorded rather than hidden.
         reports a tail. `runners.rollout` already returns what IAE, overshoot
         and settling time need; violation rate and quantiles do not exist. Ten
         seeds is also thin for a tail.
-      - [ ] **Oracle arm on `SamplingMPC`.** Thread the evaluation key into
-        `_score` instead of the fixed `PRNGKey(0)`. Watch the reactor: its
-        demand keys off `state.demand_key`, carried in the state, so any
-        planner rolling out `step_env` is *already* a demand oracle whether or
-        not that was intended.
+      - [ ] **Oracle arm on `SamplingMPC`.** The premise here has inverted, and
+        the warning in the old wording was righter than it knew. Because
+        `rollout` drives the plant with `PRNGKey(seed)` and the planners scored
+        under a fixed `PRNGKey(0)`, **every** stochastic environment was an
+        oracle on seed 0, not just the reactor: on the battery that was worth
+        350.4 against an honest 151.8. That is now closed by `plan_params`, so
+        an oracle arm is something to re-enable deliberately -- pass the
+        evaluation key through `plan_params` rather than around it -- and its
+        results must never reach `data/baseline_returns.json`.
       - [ ] **Scenario arm on `SamplingMPC`.** A vmap over K disturbance keys
         and a mean, on top of the vmap over action samples it already does.
         Then a decision about whether to average the objective or use a risk
@@ -400,12 +410,12 @@ what is broken and recorded rather than hidden.
         `SamplingMPC` needs only an objective, and it needs no gradients, which
         matters because pH's bisection solve and the furnace's implicit gas
         solve are both gradient risks and the kiln's adjoint already overflows.
-      - [ ] **Decide what the deterministic arm actually is.** The gradient and
-        sampling planners pass a fixed `PRNGKey(0)` into the true dynamics, so
-        they plan against one specific wrong disturbance trajectory rather than
-        the mean. Documented in `baselines.md` as it stands. Whether planning
-        on the mean controls better has not been measured, and changing it
-        invalidates every baseline, so measure first.
+      - [x] **Decide what the deterministic arm actually is.** Decided and
+        measured: it plans on the **mean**. `experts.mpc.plan_params` zeroes the
+        parameters named in `EnvSpec.noise_fields` for the planner's copy of
+        the params, which is certainty equivalence. It controls better, not
+        merely more honestly: the wind turbine went from 343.9 to 348.3, and
+        the battery MPC from losing 9 seeds in 10 to leading.
       - [ ] **An asymmetric reward variant**, if mechanism 2 is to be isolated
         cleanly rather than merely present. Every reward here is symmetric in
         the error, including the cement kiln's free lime; they are all
@@ -430,10 +440,9 @@ what is broken and recorded rather than hidden.
       nine-to-eleven hour re-record, purely because the fingerprint hashes the
       file whole rather than the definitions an environment reaches.
 
-* [ ] **Host the documentation.** `docs/` is written and its examples are
-      executed by the suite, but it is read as Markdown on GitHub. A GitHub
-      Pages site (MkDocs Material) would give it navigation, search and a
-      versioned URL, built and deployed from the same workflow that tests it.
+* [x] **Host the documentation.** Done, and this was a duplicate of the 0.6
+      blocking entry above; it survived because nothing checks the roadmap
+      against itself.
 * [ ] **Publish RL baseline results.** The environments claim a learned policy
       has something real to beat; no learned policy's numbers are published yet.
       The harness is in place: `data/rl_results.json`, written through
@@ -577,7 +586,8 @@ what is broken and recorded rather than hidden.
       without tracking and no episode can profit by ending early, which made
       the flat crash penalties redundant, and they are gone. See
       [reward-shaping.md](reward-shaping.md).
-* [ ] **Move off the Alpha classifier** once the others above are settled.
+* [x] **Move off the Alpha classifier.** Done: `pyproject.toml` declares
+      `Development Status :: 4 - Beta`, per the decision recorded above.
 
 ### Documentation debt
 

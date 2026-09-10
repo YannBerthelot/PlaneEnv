@@ -176,6 +176,12 @@ def baseline_fingerprint(spec) -> str:
     h.update(_digest_paths(_SHARED_SOURCES).encode())
     h.update(json.dumps(values, sort_keys=True).encode())
     h.update(json.dumps(gains, sort_keys=True).encode())
+    # Which parameters the planner zeroes for its own model. Not a parameter
+    # *value*, so ``values`` above does not see it, yet it decides whether the
+    # MPC plans on the mean disturbance or on one invented realisation of it --
+    # worth 350.4 against 151.8 on the battery. A record taken under one and
+    # read under the other is exactly the silent staleness this guards.
+    h.update(json.dumps(sorted(getattr(spec, "noise_fields", ()))).encode())
     return h.hexdigest()[:16]
 
 

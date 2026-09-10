@@ -32,6 +32,7 @@ from gymnax.environments import spaces
 from target_gym.base import EnvState
 from target_gym.experts.pid import make_plane3d_heading_pid
 from target_gym.patrol.env import (
+    N_LEAD_LEGS,
     PatrolParams,
     PatrolState,
     decode_action,
@@ -145,6 +146,7 @@ class PlanePatrolMARL:
             slot_right=state.slot_right[i],
             slot_up=state.slot_up[i],
             lead_turn_rate=0.0,
+            lead_turn_schedule=jnp.zeros(N_LEAD_LEGS),
             time=0,
         )
 

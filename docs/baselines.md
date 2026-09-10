@@ -5,6 +5,42 @@ real to beat. A benchmark whose only reference point is a random policy tells
 you an agent learned *something*; one with a tuned PID tells you whether it
 learned anything worth having.
 
+## What a PID losing here does and does not mean
+
+This suite is built to collect tasks where **anticipation pays**. It is not
+evidence that PID control is inferior, and no number in it should be quoted
+that way.
+
+A PID is optimal, or so close that the difference is unmeasurable, whenever
+the reference and the disturbances are things you can react to rather than
+things you must foresee. Twice now this project has had to learn that from its
+own measurements rather than from principle, and both times the environment was
+at fault, not the controller:
+
+- The **battery** tracked a dispatch signal whose one-step innovation had a
+  standard deviation of 63.6 kW against a 150 kW tracking band. The best
+  attainable tracking reward was 0.429; the PID scored 0.447 and the MPC 0.430.
+  Both were pinned on an irreducible noise floor. Nothing could have beaten
+  that PID, because there was nothing left to control.
+- The **patrol follower** chased a lead that held one constant turn rate for a
+  whole episode. Adding a single feedforward term took its settled error from
+  77.8 m to 2.4 m, against a 3 m reward precision floor. A constant, exactly
+  observable rate is cancelled outright by feedforward -- that is what
+  feedforward *is* -- so the PID was near-optimal and the MPC had nothing to
+  anticipate.
+
+In both cases the honest finding was that the task was not measuring control
+skill, and the fix was to the environment: a scheduled dispatch signal for the
+battery, a routed lead for the patrol. Both changes are described in the
+relevant `PHYSICS.md`.
+
+So read the table below as a statement about **these tasks**, chosen because
+lookahead, constraint handling or a model earn their keep in them. Where a PID
+sits close to the MPC, the usual explanation is that the task is one a good
+reactive controller can solve, which is a fact about the problem and often the
+right answer in practice. A PID is cheap, transparent, certifiable and runs on
+a microcontroller; none of those properties appear anywhere in a return.
+
 ## Calling a baseline like an agent
 
 Both baselines are available as one uniform callable, so a single evaluation
@@ -52,11 +88,18 @@ The underlying objects are reachable directly if you need them, through
 
 ## Coverage
 
-All twenty-one environments ship a PID. Nineteen also ship an MPC; the two
-`patrol` variants do not, and `EnvSpec.baselines_note` records why -- the
-follower's plant is the full 3D aircraft and its reference is a *manoeuvring
-lead*, so an MPC needs the lead's future trajectory as a time-varying
-parameter, which is not yet wired.
+All twenty-one environments ship a PID. Twenty also ship an MPC; only
+`patrol_bearing_only` does not, and `EnvSpec.baselines_note` records why -- it
+withholds the decomposed slot error a planner would read, which is the point of
+the variant, so it needs a planner built on its estimator rather than the
+full-observation one.
+
+The obstacle once recorded against a `patrol` MPC -- that its reference is a
+manoeuvring lead, so the lead's future trajectory would have to be wired in as
+a time-varying parameter -- is real for a CasADi model and irrelevant for a
+gradient planner. The lead is scripted and deterministic, so a planner that
+differentiates the true `step_env` propagates it for free, exactly as it
+propagates the follower.
 
 A missing baseline is a documented gap rather than a silent one: the
 conformance suite reads `baselines_note` and skips with that reason, so a

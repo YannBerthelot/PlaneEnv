@@ -44,6 +44,7 @@ import sys
 import threading
 import time
 
+import jax
 import numpy as np
 
 from target_gym.provenance import BASELINES_PATH, baseline_fingerprint
@@ -226,17 +227,60 @@ def _merge_reports(reports: list[dict]) -> dict:
     }
 
 
+def _accelerated() -> bool:
+    """Whether JAX has a GPU or TPU to batch the seeds onto.
+
+    This decides how the seeds are parallelised, and the right answer is the
+    opposite on the two backends.
+
+    ``vmap`` is the more *efficient* of the two per unit of work -- measured on
+    patrol, 0.0043 s per iteration per seed batched against 0.0159 s serial,
+    so batching is nearly four times better per iteration. But a vmapped
+    rollout on CPU is **not multicore**: measured at 126-147% CPU of a possible
+    1400% on a fourteen-core machine, because its speedup comes from SIMD and
+    amortised dispatch rather than from using more cores. Ten processes use ten
+    cores, so on CPU they win the wall-clock despite doing the arithmetic less
+    efficiently.
+
+    On a GPU the reasoning inverts. The device needs thousands of independent
+    lanes to be busy at all, so one seed leaves most of it idle and ten seeds
+    cost little more than one; meanwhile ten processes would be ten contexts
+    contending for one device. There, batching is close to free parallelism.
+    """
+    try:
+        return any(d.platform in ("gpu", "tpu") for d in jax.devices())
+    except Exception:
+        return False
+
+
 def _split_by_planner(names: list[str]) -> tuple[list[str], list[str]]:
     """Separate the environments that vmap from the ones that need a process each.
 
-    ``GradientMPC`` is JAX throughout and its ``_optimize`` is a pure function
-    of ``(actions_init, state)``, so its ten seeds batch into one call. The
-    CasADi planners call IPOPT, which is outside JAX and cannot be vmapped or
-    jitted, so their seeds become separate processes. IPOPT is single-threaded,
-    so that parallelises cleanly.
+    Two things decide this. ``GradientMPC`` is JAX throughout and its
+    ``_optimize`` is a pure function of ``(actions_init, state)``, so its ten
+    seeds *can* batch into one call; the CasADi and sampling planners cannot,
+    because IPOPT is a solver outside JAX, and they always get one process per
+    seed. IPOPT is single-threaded, so that parallelises cleanly.
+
+    Whether the ones that can batch actually do is a property of the machine,
+    not of the environment -- see :func:`_accelerated`. On a GPU they batch; on
+    CPU they get a process each, because a vmapped rollout there uses about one
+    and a half cores no matter how many are free.
+
+    The two routes agree to about 0.2% rather than exactly: vmapped and scalar
+    XLA kernels reduce in different orders and a closed loop amplifies that
+    over hundreds of steps. Both are valid rollouts of the same controller, so
+    a record taken on a GPU and one taken on CPU differ at that level, well
+    inside the contract's tolerance.
     """
     from target_gym.experts.mpc import GradientMPC
 
+    accel = _accelerated()
+    print(
+        f"  seeds parallelised by {'vmap' if accel else 'one process each'} "
+        f"({jax.default_backend()})",
+        flush=True,
+    )
     batched, per_seed = [], []
     for name in names:
         spec = REGISTRY[name]
@@ -244,7 +288,7 @@ def _split_by_planner(names: list[str]) -> tuple[list[str], list[str]]:
             print(f"  {name:20s} no MPC baseline, skipped", flush=True)
             continue
         probe = spec.make_mpc(spec.make_env(), spec.make_test_params())
-        (batched if isinstance(probe, GradientMPC) else per_seed).append(name)
+        (batched if isinstance(probe, GradientMPC) and accel else per_seed).append(name)
     return batched, per_seed
 
 
@@ -339,9 +383,35 @@ def main() -> int:
         n: int(REGISTRY[n].make_test_params().max_steps_in_episode) for n in live
     }
 
-    # Every core to the pool. The parent used to run the vmapped batches
-    # itself and needed one held back; now it only submits, drains and writes.
-    workers = max(1, os.cpu_count() or 2)
+    # Sized by memory, not by cores.
+    #
+    # Each worker holds a reverse-mode rollout and measures 300 MB to 1.45 GB
+    # resident, averaging about 700 MB. One per core put fourteen of them on
+    # this machine, which is ~10 GB, exhausted RAM and sent it swapping: pages
+    # free fell to 4874, the compressor held 3.4 M pages, and the load average
+    # reached 158 on fourteen cores while every worker sat at a well-behaved
+    # 95% CPU. Nothing finished in ten minutes. The load was threads blocked on
+    # memory, not contention for cores, which is why capping threads earlier
+    # changed nothing.
+    #
+    # So budget roughly 1.5 GB a worker against total RAM and stay under the
+    # core count. Keep at least two so the pool is still a pool.
+    import psutil  # noqa: PLC0415  -- optional, fall back if absent
+
+    try:
+        # *Available*, not total. This machine has 24 GB, so budgeting against
+        # the total allowed sixteen workers -- more than its fourteen cores,
+        # i.e. no cap at all -- while the run that thrashed used only ~10 GB.
+        # The difference is everything already resident: the compressor alone
+        # held 3.4 M pages before the run started.
+        budget = int(psutil.virtual_memory().available / (2.0 * 1024**3))
+    except Exception:
+        budget = 6
+    workers = max(2, min(os.cpu_count() or 2, budget))
+    print(
+        f"  {workers} workers (cores {os.cpu_count()}, memory budget {budget})",
+        flush=True,
+    )
 
     # Reap our own pool if we are killed.
     #

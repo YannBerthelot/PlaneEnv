@@ -203,26 +203,15 @@ class TestExpert:
         [
             0.0,
             0.002,
-            pytest.param(
-                -0.003,
-                marks=pytest.mark.xfail(
-                    strict=True,
-                    reason=(
-                        "The hardest case -- the lead's maximum left turn -- "
-                        "settles 78 m from the slot against a 60 m tolerance. "
-                        "The other two turn rates now hold it. This whole test "
-                        "used to fail at ~139 m and was attributed to the "
-                        "guidance law needing rework, on the grounds that a grid "
-                        "search over the gains got no closer. That was wrong: it "
-                        "was integration error. Halving the step (rk4_1 -> "
-                        "rk4_2, see plane3d/PHYSICS.md) took the settled error "
-                        "from 98.5 m to 41.2 m averaged over seeds, with no "
-                        "change to the controller at all. What is left here may "
-                        "well be the guidance law, but that claim has not "
-                        "survived a measurement once yet."
-                    ),
-                ),
-            ),
+            # The lead's hardest turn, which used to settle 78 m from the
+            # slot against a 60 m tolerance and was an xfail. The follower now
+            # feeds the lead's turn rate forward, so the offset that was
+            # exactly linear in that rate -- 25.9 m per 0.001 rad/step -- is
+            # gone, and this settles at 2.4 m, against a reward precision floor
+            # of 3 m. Kept parametrised at the extreme because that is the case
+            # that exposed the missing term.
+            -0.003,
+            0.003,
         ],
     )
     def test_expert_holds_formation(self, turn):

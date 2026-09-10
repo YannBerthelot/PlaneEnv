@@ -93,6 +93,24 @@ running the pack empty or full **ends the episode irrecoverably**. Unlike a
 thermal plant, the battery cannot hold a setpoint indefinitely — tracking now
 costs the ability to track later.
 
+**The dispatch signal is a schedule, not a random walk.** Twelve blocks, each
+held for a 300 s market interval, drawn uniformly in ±0.8 MW, with 2 kW of
+regulation jitter on top. That is what a grid battery is actually handed: a
+setpoint for a dispatch interval, then another.
+
+It used to be an Ornstein-Uhlenbeck process, and that made the task
+unmeasurable rather than merely unrealistic. Its one-step innovation had a
+standard deviation of 63.6 kW against a 150 kW tracking band, so the best
+attainable tracking reward was **0.429** — and the shipped PID scored 0.447
+while the MPC scored 0.430. Both controllers were pinned on an irreducible
+noise floor, and nothing that could be plugged into the environment would have
+scored meaningfully better. The error is now the transient after each scheduled
+step, which is a property of the controller rather than of the dice.
+
+The whole schedule is in the state, so a predictive controller can see the next
+block coming; the observation exposes only the current request, which is what
+keeps that a real advantage rather than a free lunch.
+
 **Observation** `[soc, V_cell, T_cell, P_MW, target_P_MW]` — what a battery
 management system actually reports. The diffusion voltage `v_rc` and the
 accumulated capacity fade `q_loss` are hidden: neither is directly measurable,
@@ -154,7 +172,7 @@ weakest-cell behaviour that actually determines real pack limits.
 
 | environment | steps | `delta_t` (s) | episode | action | obs | float state |
 | --- | --- | --- | --- | --- | --- | --- |
-| `battery` | 360 | 5 | 30 min | 1 in [-1, 1] | 5 | 7 |
+| `battery` | 360 | 5 | 30 min | 1 in [-1, 1] | 5 | 19 |
 
 `float state` counts the scalar and array float fields the state carries,
 `time` excluded; the gap between it and `obs` is what the controller cannot

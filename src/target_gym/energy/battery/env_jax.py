@@ -9,6 +9,7 @@ from gymnax.environments import environment, spaces
 
 from target_gym.base import canonical_reset
 from target_gym.energy.battery.env import (
+    N_DISPATCH_BLOCKS,
     BatteryParams,
     BatteryState,
     check_is_terminal,
@@ -97,11 +98,16 @@ class GridBattery(environment.Environment[BatteryState, BatteryParams]):
             minval=params.initial_soc_range[0],
             maxval=params.initial_soc_range[1],
         )
-        target = jnp.clip(
-            params.dispatch_std * jax.random.normal(dispatch_key),
-            -params.power_max,
-            params.power_max,
+        # A schedule of held setpoints, drawn once. The pack is told what it
+        # will be asked for; whether it can deliver it out of a finite energy
+        # budget is the task.
+        schedule = jax.random.uniform(
+            dispatch_key,
+            shape=(N_DISPATCH_BLOCKS,),
+            minval=-params.dispatch_range,
+            maxval=params.dispatch_range,
         )
+        target = jnp.clip(schedule[0], -params.power_max, params.power_max)
 
         # Rested pack: no diffusion voltage, at ambient, undegraded. A battery
         # entering a dispatch window has typically been idle, and starting with
@@ -115,6 +121,7 @@ class GridBattery(environment.Environment[BatteryState, BatteryParams]):
             current=jnp.zeros(()),
             power=jnp.zeros(()),
             target_power=target,
+            dispatch_schedule=schedule,
         )
         return self.get_obs(state), state
 

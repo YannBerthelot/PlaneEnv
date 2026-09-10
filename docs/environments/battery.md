@@ -38,7 +38,7 @@ Every environment in this suite scores on one contract: the reward is
 
 ## Starting state
 
-`reset` samples the initial condition and the target; state has 8 fields.
+`reset` samples the initial condition and the target; state has 9 fields.
 
 ## Episode end
 
@@ -52,8 +52,11 @@ Measured over 10 seeds on a 360-step episode (see [Baselines](../baselines.md)):
 
 | controller | return | per step |
 |---|---|---|
-| PID | 160.8 | 0.447 |
-| MPC | 174.6 | 0.485 |
+| PID | 262.0 | 0.728 |
+| MPC | 265.8 | 0.738 |
+
+!!! warning "The MPC is not an upper bound here"
+    This MPC loses to its own PID on 9 of 10 seeds, by 3 to 11 points each, and its published mean leads only because of seed 0: 350.
 
 ## Arguments
 
@@ -73,5 +76,5 @@ Measured over 10 seeds on a 360-step episode (see [Baselines](../baselines.md)):
 | `ocv_c` | 0.3 |
 | `ocv_d` | 12 |
 | `ocv_e` | 0.05 |
-| … | 21 more, see the params dataclass |
+| … | 23 more, see the params dataclass |
 

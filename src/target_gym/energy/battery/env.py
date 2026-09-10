@@ -56,10 +56,20 @@ from target_gym.utils import convert_raw_action_to_range, log_scaled_reward
 GAS_CONSTANT = 8.314  # J/(mol K)
 KELVIN = 273.15
 
-# Ornstein-Uhlenbeck dispatch signal: mean-reversion rate (1/s). 1/theta ~ 500 s,
-# so the grid's request drifts on a timescale comparable to the energy budget
-# rather than flickering.
-DISPATCH_OU_THETA = 2.0e-3
+#: Dispatch blocks in a schedule. A grid battery is not handed a random walk:
+#: it is handed a setpoint, holds it for a market interval, and is handed
+#: another. Twelve blocks covers a 60 min episode at the 5 min interval below.
+#:
+#: The signal used to be an Ornstein-Uhlenbeck process, and it made the task
+#: unmeasurable. Its one-step innovation had a standard deviation of 63.6 kW
+#: against a 150 kW tracking band, which puts the *best possible* tracking
+#: reward at 0.429 -- and the shipped PID scored 0.447 while the MPC scored
+#: 0.430. Both controllers were sitting on an irreducible noise floor, so the
+#: environment could not tell a good controller from a mediocre one, and the
+#: only thing separating them was noise. A schedule is both more plausible and
+#: actually measures something: the error is now the transient after each step,
+#: which is what a controller is for.
+N_DISPATCH_BLOCKS = 12
 
 
 @struct.dataclass
@@ -131,7 +141,15 @@ class BatteryParams(EnvParams):
     soc_comfort_weight: float = 0.10  # gentle pull toward mid charge
 
     # ---- Dispatch signal ----
-    dispatch_std: float = 0.45e6  # W, OU stationary std
+    # Held for a market interval, then stepped. 300 s is the dispatch interval
+    # of most wholesale real-time markets.
+    dispatch_block_seconds: float = 300.0
+    dispatch_range: float = 0.8e6  # W, half-range of a block's level
+    # Regulation jitter on top of the held setpoint. Deliberately small against
+    # the 150 kW band: it should stop the task being noise-free without
+    # becoming the thing that decides the score. At 2 kW the best attainable
+    # tracking reward is ~0.86 rather than the OU signal's 0.43.
+    dispatch_noise_std: float = 2.0e3  # W
     initial_soc_range: Tuple[float, float] = (0.35, 0.75)
 
     # ---- Time discretization ----
@@ -151,6 +169,16 @@ class BatteryState(EnvState):
     current: float  # pack current (A), positive = discharge
     power: float  # delivered electrical power (W)
     target_power: float  # dispatch request (W)
+    # The whole schedule, so a predictive controller can see the next block
+    # coming. The observation exposes only the current request, which is what
+    # keeps the lookahead a genuine advantage rather than a free lunch.
+    dispatch_schedule: jnp.ndarray
+
+
+def dispatch_block(time, params: BatteryParams, xp=jnp):
+    """Which block of the schedule is live at *time*."""
+    per_block = xp.maximum(params.dispatch_block_seconds / params.delta_t, 1.0)
+    return xp.clip((time / per_block).astype(int), 0, N_DISPATCH_BLOCKS - 1)
 
 
 def open_circuit_voltage(soc, params: BatteryParams):
@@ -257,18 +285,13 @@ def compute_next_state(
     current = current_for_power(power_cmd, soc, v_rc, p)
     power = terminal_voltage(current, soc, v_rc, p) * current
 
-    # OU dispatch signal. Drawn from a key folded with ``state.time`` so a
-    # caller passing a constant key -- which every rollout helper here does --
-    # still gets a genuine zero-mean process.
+    # Scheduled dispatch: the level for the block that is live at the *next*
+    # step, plus regulation jitter. The jitter is drawn from a key folded with
+    # ``state.time`` so a caller passing a constant key -- which every rollout
+    # helper here does -- still gets a genuine zero-mean process.
     noise = jax.random.normal(jax.random.fold_in(key, state.time))
-    sigma = p.dispatch_std * jnp.sqrt(2.0 * DISPATCH_OU_THETA * p.delta_t)
-    target = jnp.clip(
-        state.target_power
-        - DISPATCH_OU_THETA * state.target_power * p.delta_t
-        + sigma * noise,
-        -p.power_max,
-        p.power_max,
-    )
+    level = state.dispatch_schedule[dispatch_block(state.time + 1, p)]
+    target = jnp.clip(level + p.dispatch_noise_std * noise, -p.power_max, p.power_max)
 
     return (
         state.replace(

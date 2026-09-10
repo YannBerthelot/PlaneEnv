@@ -296,6 +296,10 @@ class Plane3DPIDState:
     # Separate integrator for the power loop (heading task MIMO altitude control)
     power_integral: float
     power_prev: float
+    # Previous lead heading, for the patrol follower's turn-rate feedforward.
+    # Unused by the other variants, and defaulted so their constructors are
+    # untouched.
+    lead_psi_prev: float = 0.0
 
 
 @struct.dataclass
@@ -581,6 +585,17 @@ class PatrolPIDParams:
     Kd_bank: float  # roll-rate (phi_dot) damping — kills the bank wobble
     max_bank_rad: float
     blend_dist: float  # in-plane distance (m) over which to blend to lead heading
+    #: Fraction of the lead's estimated turn rate fed forward. 1.0 is the
+    #: physically right value: in a steady turn the follower has to turn at the
+    #: lead's rate whatever its position error happens to be. Exposed as a gain
+    #: only so it can be swept, and so a tuner can back it off if the estimate
+    #: ever gets noisy.
+    Kff_lead: float
+    #: Clamp on the estimated lead turn rate (rad/s). The estimate is a
+    #: one-step difference of the lead heading, and on the very first call
+    #: there is no previous sample, so it is bounded to something the lead can
+    #: physically fly rather than special-cased.
+    lead_rate_max: float
     dt: float
 
 
@@ -680,7 +695,26 @@ def patrol_pid_step(
         + params.Ki_hdg * new_hdg_int
         + params.Kd_hdg * hdg_d
     )
-    turn_rate_cmd = _G * bank_cmd / _PATROL_NOMINAL_SPEED
+    # Feedforward the lead's turn.
+    #
+    # Without this the loop is proportional control against a rotating
+    # reference, and it settles exactly where the position error generates the
+    # bank the turn needs. Measured, that offset is precisely linear in the
+    # lead's turn rate and symmetric in its sign: 2.1 m straight and level,
+    # 25.9 m at 0.001 rad/step, 51.8 m at 0.002, 77.8 m at 0.003, against a
+    # 60 m tolerance. It is not a mistuning -- a grid search over these gains
+    # never closed it, which was once read as the guidance law needing rework
+    # -- it is a missing term. Close to the slot the law blends onto "fly
+    # parallel", which sets the follower's heading and never commands the rate
+    # the turn requires.
+    #
+    # The lead's turn rate is not observed, but its heading is, as
+    # ``psi + rel_heading``, so one step of difference recovers it exactly.
+    # (With measurement noise, a roadmap item, this needs a filter.)
+    psi_lead_now = _wrap_angle(psi_lead)
+    lead_rate = _wrap_angle(psi_lead_now - state.lead_psi_prev) / params.dt
+    lead_rate = jnp.clip(lead_rate, -params.lead_rate_max, params.lead_rate_max)
+    turn_rate_cmd = params.Kff_lead * lead_rate + _G * bank_cmd / _PATROL_NOMINAL_SPEED
     turn_rate_max = _G * jnp.tan(params.max_bank_rad) / speed
     turn_rate_cmd = jnp.clip(turn_rate_cmd, -turn_rate_max, turn_rate_max)
     desired_bank = jnp.arctan(speed * turn_rate_cmd / _G)
@@ -695,6 +729,7 @@ def patrol_pid_step(
         track_prev=heading_err,
         power_integral=new_power_int,
         power_prev=e_back,
+        lead_psi_prev=psi_lead_now,
     )
     return jnp.array([power, stick, aileron]), new_state
 
@@ -726,6 +761,8 @@ def make_patrol_pid() -> tuple[PatrolPIDParams, Plane3DPIDState]:
         Kd_bank=float(_p.get("Kd_bank", 3.124)),
         max_bank_rad=float(np.deg2rad(30.0)),
         blend_dist=float(_p.get("blend_dist", 500.0)),
+        Kff_lead=float(_p.get("Kff_lead", 1.0)),
+        lead_rate_max=float(_p.get("lead_rate_max", 0.005)),
         dt=1.0,
     )
     return params, plane3d_pid_reset(params)

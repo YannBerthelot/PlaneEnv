@@ -9,7 +9,7 @@ Nuclear reactor — point-kinetics with delayed neutrons, xenon poisoning, therm
 | Action space | `Box((1,))`, all actions in [-1, 1] |
 | Observation space | `Box((4,))` |
 | Tracked variable(s) | neutron power (normalised) |
-| Episode length | 1200 steps (1200 s at dt = 1 s) |
+| Episode length | 8640 steps (8640 s at dt = 1 s) |
 | Import | `from target_gym import Reactor, ReactorParams` |
 | Cite as | `reactor-v1` |
 
@@ -44,23 +44,23 @@ Every environment in this suite scores on one contract: the reward is
 
 **Termination.** See `check_is_terminal`.
 
-**Truncation.** After 1200 steps.
+**Truncation.** After 8640 steps.
 
 ## Baselines
 
-Measured over 10 seeds on a 1200-step episode (see [Baselines](../baselines.md)):
+Measured over 10 seeds on a 8640-step episode (see [Baselines](../baselines.md)):
 
 | controller | return | per step |
 |---|---|---|
-| PID | 97.5 | 0.081 |
-| MPC | 149.5 | 0.125 |
+| PID | 703.9 | 0.081 |
+| MPC | 1080.7 | 0.125 |
 
 ## Arguments
 
 | parameter | default |
 |---|---|
 | `delta_t` | 1 |
-| `max_steps_in_episode` | 1200 |
+| `max_steps_in_episode` | 8640 |
 | `Lambda_gen` | 0.0001 |
 | `alpha_fuel` | -3e-05 |
 | `alpha_coolant` | -5e-05 |

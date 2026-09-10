@@ -40,7 +40,7 @@ Every environment in this suite scores on one contract: the reward is
 
 ## Starting state
 
-`reset` samples the initial condition and the target; state has 11 fields.
+`reset` samples the initial condition and the target; state has 12 fields.
 
 ## Episode end
 
@@ -50,7 +50,12 @@ Every environment in this suite scores on one contract: the reward is
 
 ## Baselines
 
-A tuned PID ships with this environment.
+Measured over 10 seeds on a 200-step episode (see [Baselines](../baselines.md)):
+
+| controller | return | per step |
+|---|---|---|
+| PID | 111.2 | 0.556 |
+| MPC | 168.1 | 0.841 |
 
 ## Arguments
 
@@ -70,5 +75,5 @@ A tuned PID ships with this environment.
 | `specific_fuel_consumption` | 0.0175 |
 | `power_response_rate` | 0.05 |
 | `stick_response_rate` | 0.9 |
-| … | 55 more, see the params dataclass |
+| … | 57 more, see the params dataclass |
 

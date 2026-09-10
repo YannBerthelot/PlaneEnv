@@ -104,6 +104,10 @@ dev = [
     { include-group = "lint" },
     { include-group = "agent" },
     "pre-commit>=3.5.0",
+    # scripts/record_baselines.py sizes its worker pool against available
+    # memory: one planner per core exhausted RAM and sent the machine
+    # swapping, which looked like CPU contention and is not.
+    "psutil>=5.9",
 ]
 docs = [
     "mkdocs>=1.6",

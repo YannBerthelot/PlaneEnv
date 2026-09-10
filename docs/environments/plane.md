@@ -51,8 +51,8 @@ Measured over 10 seeds on a 280-step episode (see [Baselines](../baselines.md)):
 
 | controller | return | per step |
 |---|---|---|
-| PID | 170.7 | 0.609 |
-| MPC | 212.8 | 0.760 |
+| PID | 249.2 | 0.890 |
+| MPC | 259.1 | 0.925 |
 
 ## Arguments
 

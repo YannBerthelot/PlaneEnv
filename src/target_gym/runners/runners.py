@@ -202,7 +202,9 @@ def rollout_mpc_batch(spec, params, n_seeds: int):
     can be zero and ``mpc_terminated_early`` is a published field.
     """
     env = spec.make_env()
-    mpc = spec.make_mpc(env, params)
+    from target_gym.experts.mpc import plan_params
+
+    mpc = spec.make_mpc(env, plan_params(spec, params))
     value_idx = _as_tuple(env.obs_value_index)
     target_idx = _as_tuple(env.obs_target_index)
     n_steps = int(params.max_steps_in_episode)
@@ -273,9 +275,11 @@ def pid_policy(spec) -> Callable | None:
 
 def mpc_policy(spec, env, params) -> Callable | None:
     """The registered MPC baseline, reset and ready."""
+    from target_gym.experts.mpc import plan_params
+
     if not spec.has_mpc:
         return None
-    mpc = spec.make_mpc(env, params)
+    mpc = spec.make_mpc(env, plan_params(spec, params))
     mpc.reset()
 
     def policy(obs, state):

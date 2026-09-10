@@ -20,7 +20,7 @@
 </p>
 
 **21 environments**: 9 aircraft, 5 process control, 5 industrial / energy,
-2 renewable energy. Every one ships a tuned PID, and nineteen an MPC as well,
+2 renewable energy. Every one ships a tuned PID, and twenty an MPC as well,
 both recorded over ten episode seeds. Learned baselines are not published yet;
 what they will be measured against, and how, is in
 [docs/rl-protocol.md](docs/rl-protocol.md).
@@ -186,10 +186,19 @@ and therefore its tier; what differs is the reference they must track.
 
 ## Baselines
 
-All 21 environments ship a tuned PID, and 19 of them an MPC as well, so you
-have something real to beat from the first run. The two **patrol** variants have
-no MPC: their reference is a manoeuvring lead, and an MPC would need its future
-trajectory to plan against.
+All 21 environments ship a tuned PID, and 20 of them an MPC as well, so you
+have something real to beat from the first run.
+
+**A PID losing here is a claim about these tasks, not about PID control.** The
+suite collects problems where anticipation pays. Where the reference and the
+disturbances are things you can react to rather than foresee, a PID is optimal
+or close enough that the gap is unmeasurable, and twice this project has had to
+learn that from its own measurements: the battery's dispatch signal was so noisy
+that *no* controller could score above 0.43 of the ceiling, and the patrol
+follower chased a lead at one constant turn rate, which a single feedforward
+term cancels outright. Both times the environment was at fault and was fixed.
+A PID is also cheap, transparent, certifiable and runs on a microcontroller,
+and none of that shows up in a return.
 
 The right *structure* usually matters more than the gains, and the baselines are
 chosen to show it: three-element control on the boiler drum, where feedwater

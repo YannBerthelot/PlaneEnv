@@ -42,10 +42,8 @@ env, params = spec.make_env(), spec.params_cls()
 | `plane3d_circle` | `plane3d_circle-v1` | (17,) | (3,) | altitude (m) | yes | yes | [contract](https://github.com/YannBerthelot/TargetGym/blob/main/src/target_gym/plane3d/PHYSICS.md) |
 | `plane3d_racetrack` | `plane3d_racetrack-v1` | (21,) | (3,) | altitude (m) | yes | yes | [contract](https://github.com/YannBerthelot/TargetGym/blob/main/src/target_gym/plane3d/PHYSICS.md) |
 | `plane3d_figure8` | `plane3d_figure8-v1` | (19,) | (3,) | altitude (m) | yes | yes | [contract](https://github.com/YannBerthelot/TargetGym/blob/main/src/target_gym/plane3d/PHYSICS.md) |
-| `patrol` | `patrol-v1` | (26,) | (3,) | slot error (m) | yes | no | [contract](https://github.com/YannBerthelot/TargetGym/blob/main/src/target_gym/patrol/PHYSICS.md) |
+| `patrol` | `patrol-v1` | (26,) | (3,) | slot error (m) | yes | yes | [contract](https://github.com/YannBerthelot/TargetGym/blob/main/src/target_gym/patrol/PHYSICS.md) |
 | `patrol_bearing_only` | `patrol_bearing_only-v1` | (21,) | (3,) | measured range (m) | yes | no | [contract](https://github.com/YannBerthelot/TargetGym/blob/main/src/target_gym/patrol/PHYSICS.md) |
-
-> `patrol` -- PID present -- a stateful wrapper around the functional pursuit expert, which already held formation; what was missing was the adapter, not the controller. No MPC yet: the follower's plant is the full 3D aircraft and the reference is a *manoeuvring lead*, so an MPC needs the lead's future trajectory as a time-varying parameter, which is not yet wired.
 
 > `patrol_bearing_only` -- PID present -- a lead-state estimator feeding the same pursuit law the full-observation variant uses. Range with azimuth and elevation is a complete relative-position measurement, so the only genuinely unobservable quantity is the lead's HEADING, which the commanded slot needs because the slot is expressed in the lead's frame; it is recovered by differencing the estimated relative position and filtering. Measured performance matches the full-observation expert (4 of 8 seeds complete, ~229 m settled slot error vs ~260 m), so the partial observation costs essentially nothing here. No MPC: the follower's plant is the full 3D aircraft and the reference is a manoeuvring lead.
 

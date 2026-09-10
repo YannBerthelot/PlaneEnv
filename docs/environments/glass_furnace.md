@@ -52,11 +52,8 @@ Measured over 10 seeds on a 1600-step episode (see [Baselines](../baselines.md))
 
 | controller | return | per step |
 |---|---|---|
-| PID | 1223.9 | 0.765 |
-| MPC | 991.8 | 0.620 |
-
-!!! warning "The MPC is not an upper bound here"
-    Pending re-record.
+| PID | 1443.5 | 0.902 |
+| MPC | 1513.4 | 0.946 |
 
 ## Arguments
 

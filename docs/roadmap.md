@@ -17,22 +17,384 @@ what is broken and recorded rather than hidden.
 
 ### Before 1.0
 
+* [ ] **Ship 0.6, the first release meant to be advertised.**
+      Deliberately 0.6 rather than 0.9: there will likely be further pre-1.0
+      releases, and numbering as though 1.0 were imminent would promise a
+      freeze that has not been decided. What 0.6 is for is getting the library
+      in front of people and finding out what breaks.
+
+      Comparable projects reached 1.0 by freezing an API rather than by
+      finishing features. Gymnasium v1.0 says it "marks the end of major changes
+      to the project's central API", and its content was mostly removal and
+      consolidation; gymnax 1.0 made the break it knew it needed, shipped a
+      legacy wrapper, and promised not to do it again. Both ran a feedback
+      period first, Gymnasium's from v1.0.0a1 in February 2024 to v1.0.0 that
+      October. 0.6 starts that clock here, as a normal release rather than a
+      pre-release, because `pip install` skips pre-releases and this package
+      needs the feedback more than the ceremony.
+
+      Everything below is doable on the machine this project is developed on.
+      None of it needs a GPU farm, which is the point: the large training grid
+      is a later release and is blocked on compute this project does not have.
+
+      **Blocking, and fatal on first contact if missed:**
+
+      - [ ] **Release before advertising.** PyPI is at 0.5.0. The 22
+        environments, the restructured README, the gallery and the versioning
+        are all unreleased, so anyone acting on a post today installs the old
+        package. This also clears the stale PyPI summary, which still mentions a
+        "Car" environment that does not exist.
+      - [x] **Environment versioning.** Done: `EnvSpec.version`,
+        `spec.versioned_name`, `data/env_versions.json`, and
+        `tests/test_env_versions.py`, which fails when an environment's
+        fingerprint moves without its version being bumped. Every environment
+        ships as `v1`.
+      - [ ] **Baselines re-recorded and green.** In progress, and now all
+        twenty rather than the eight that were outstanding: the two controller
+        fixes above touch `experts/pid.py` and `experts/mpc.py`, which the
+        baseline fingerprint hashes whole, so the twelve plants recorded on
+        5 September are stale too. This is the cost the fingerprint-scoping
+        item below is about. The aircraft are the long pole and should run
+        under `caffeinate` so a sleeping machine does not stall them again;
+        the 15.5 hours the glass furnace took on the last run is what that
+        looks like when it does.
+      - [ ] **Host the documentation.** Needs a Pages deploy job, which does not
+        exist yet, and the repository's Pages source set to GitHub Actions.
+      - [x] **`CODE_OF_CONDUCT.md`.** Done: Contributor Covenant 2.1
+        verbatim, with the maintainer's address as the reporting contact,
+        linked from `CONTRIBUTING.md`. Verbatim because it is the text
+        GitHub's community profile recognises and contributors already
+        know; a house rewording would be neither.
+
+      **Baseline gaps to close or document honestly:**
+
+      - [x] **`plane_steps` MPC terminates on all ten seeds** (656 against the
+        PID's 1593). Fixed, by two separate defects, and it was never the
+        moving setpoint: freezing the target reproduced the first crash
+        exactly, with the aircraft on the ground at t=372 and the first tread
+        change still 28 s away.
+
+        The first defect is in the objective. The altitude reward scores one
+        thing and the aircraft has two actuators, so over a 90 s planning
+        window the best move is a zoom climb, trading airspeed for altitude
+        faster than the engines can supply it. It touched the commanded
+        altitude at t=90 with 30 m/s of airspeed left and departed.
+        `_plane_objective` now carries a barrier on airspeed against the stall
+        speed at that mass and altitude, the pattern `make_wind_turbine_mpc`
+        already uses. Fencing angle of attack instead does not work: it sits at
+        4-8 deg through the whole manoeuvre and crosses 15 deg one step before
+        the departure.
+
+        The second defect is in the search, it is the more serious of the two,
+        and it belongs to `GradientMPC` rather than to the aircraft. Saturating
+        actuators are written with `clip` or `maximum`, whose derivative at the
+        kink is exactly zero, and `_optimize` projected onto the closed
+        interval, so any overshooting step parked an action exactly on a bound
+        and it could never move again. Measured at the plan where the aircraft
+        gave up: the true one-sided slope in thrust is +3.0 and autodiff
+        returns 0.0, with thrust pinned at -1.000 for 800 steps while the
+        elevator went on being optimised normally. Holding iterates 1e-3 inside
+        the bounds fixes it, which is what interior-point solvers do and for
+        this reason. Twelve of the twenty environments with an MPC use this
+        optimiser, so any of them with a saturating actuator could have been
+        silently sitting at a limit. Re-recording says none of the four plants
+        among them was: they moved by under half a point of return, and
+        distillation not at all. It was latent there and real on the aircraft.
+
+        Worth recording that four other explanations were argued from a
+        plausible mechanism and refuted by the next measurement: the moving
+        setpoint, an energy trade the planner would not make, fuel exhaustion,
+        and NaN gradients. Sampling the objective on a grid, which is what
+        finally located it, cost five minutes and should have come first.
+      - [x] **Tune the `plane3d_racetrack` PID.** Done, and the settled
+        cross-track error goes from 3.02 km to 0.31 km against an 8.4 km turn
+        radius, with the return from 269.2 to 319.0. The `expert_degraded`
+        note is gone: it now clears the effectiveness contract on its own.
+
+        Two things were in the way. The class declared `obs_value_index` and
+        no `obs_target_index`, so `runners.rollout` raised on it: the search
+        scores candidates inside a `try` and reported every one as `-inf`,
+        finishing successfully having changed nothing, and no baseline could
+        have been recorded for the environment either. The conformance suite
+        now checks both indices across the registry, where the tests that
+        covered this named three classes by hand.
+
+        And left free, the search stiffens the roll loop and removes its
+        damping, because nothing in the reward objects to how the aircraft is
+        banked: +21 of return for an achieved bank of 48 deg against a 30 deg
+        command limit, and worse tracking. The roll gains are held, and the
+        whole improvement is in the cross-track gain.
+
+      **Worth doing, cheap:**
+
+      - [x] A Colab or notebook linked from the README. Done:
+        `notebooks/quickstart.ipynb`, with a badge in the README, a link from
+        `docs/index.md`, and `tests/test_docs.py` executing it so it cannot
+        rot. gymnax and Brax both lead with one, and it turns a reader into a
+        user in a click.
+      - [x] Decide the `4 - Beta` classifier question. Decided: 0.6 ships as
+        `4 - Beta`. Twenty-two environments, a versioning scheme with a test
+        enforcing it, a documented public API contract and a conformance suite
+        that runs against every environment are not what `3 - Alpha` describes
+        to someone scanning PyPI. It is not a promise of an API freeze, which
+        stays explicitly deferred past 0.6.
+
+      Left for a later release, explicitly: every learned-policy number, the
+      hyperparameter search, and the API freeze decisions (whether `Plane` or
+      `Airplane2D` is canonical, whether `step_env` stays public alongside
+      `step`, any remaining observation-layout changes).
+
+      That includes the preliminary CPU slice that used to be planned here
+      (five environments, PPO and SAC, tabula-rasa, budgets 1e5 and 1e6, 30
+      seeds, published defaults). It is out of 0.6 by decision, not by
+      accident. What 0.6 is for is putting the environments and their expert
+      baselines in front of people; a small, deliberately underpowered RL
+      result is the one number a reader would over-read, and publishing it
+      alongside "no results yet" invites exactly the comparison the protocol
+      was written to prevent. `docs/rl-baselines.md` saying the harness exists
+      and nothing is published is a cleaner claim than a preliminary table
+      hedged with caveats.
+
+* [ ] **Scope the baseline fingerprint to the code each environment reaches.**
+      `provenance.baseline_fingerprint` hashes the whole of `experts/pid.py` and
+      `experts/mpc.py`, so *adding* a controller for a new environment marks
+      every existing environment's record stale. Registering the racetrack hold
+      added 93 lines to `pid.py` and deleted none, and that alone invalidated
+      all twenty recorded baselines, though no existing controller's behaviour moved.
+      Re-recording is cheap enough today (the aircraft variants dominate the
+      cost and needed re-recording regardless), so this was paid rather than
+      fixed, but it scales badly: it is a full re-measure per environment added.
+      The fix is to hash only the definitions an environment's own controllers
+      reach, transitively, plus module-level constants. It must stay
+      conservative, because the module's whole point is that it may cry stale when
+      nothing changed but must never report fresh when something did. So an
+      unresolvable entry point has to fall back to hashing the entire file.
+
+* [ ] **Find a defensible framing for running cost, then put it back.**
+      Seven environments carried a consumption term in their reward -- fuel on
+      the glass furnace, the boiler drum and the cement kiln, energy on the
+      building, reboiler duty on the column, reagent on the pH loop, import cost
+      on the battery. All seven are zero for the 0.6 line, and the tasks score
+      setpoint tracking alone. The fields and the terms are still there, so
+      restoring a weight is a one-line change once there is a reason to pick a
+      particular one.
+
+      Running cost is real: nobody operates a furnace without caring what the
+      gas costs. The problem is the *weight*. Against a tracking term that is
+      already normalised into [0, 1], a cost weight silently chooses a point on
+      a Pareto front, and none of the seven had an argument behind its number.
+      The glass furnace showed what that costs: a 0.1 fuel weight against the
+      MPC's quadratic surrogate made a 3.3 K standing error optimal, so the
+      controller sat 6 K cold with fuel at minimum 80% of the time and lost to
+      its own PID. The reward and the controller disagreed about the trade, and
+      both were defensible readings of an undefined one.
+
+      What a proper framing needs: the two terms in commensurable units rather
+      than one normalised and one priced, so the exchange rate is a physical
+      statement instead of a tuning constant. For the furnace that is money per
+      kelvin-hour of off-spec glass against money per GJ of gas, both of which
+      are quotable. It also needs the controller's surrogate to inherit the same
+      exchange rate rather than re-deriving it, which is the band item above.
+
+* [ ] **Measurement noise, anywhere.** Not one of the environments has any.
+      Every controller in the suite reads the exact state, filtered only where a
+      sensor lag was modelled deliberately (the glass furnace's crown
+      thermocouple, and nothing else). Real instruments are noisy, and a
+      benchmark that asks "can a learned policy hold a setpoint more precisely
+      than a PID" without noise is asking it in the one regime where derivative
+      action is free. This is a 1.0 item rather than a 0.6 one: adding noise
+      invalidates every baseline and every tuned gain, and the tuning has to be
+      redone against it rather than ported.
+
+* [ ] **Cullet ratio on the glass furnace.** Declared as deviation D4 in its
+      PHYSICS.md. Batch is a mix of raw materials and recycled glass, and cullet
+      melts with roughly 2.5 % less energy per 10 % of the charge; real plants
+      see it move by tens of percent as supply changes, usually without
+      measuring it well. It is a *gain* disturbance, which is qualitatively
+      unlike every disturbance the suite currently carries: integral action
+      cancels a load and does not cancel a gain error. It would be the first of
+      its kind here.
+
+* [ ] **Transport delay on the aircraft, if it is warranted.** The furnace had
+      no dead time and a PID held it thirty times tighter than a real furnace is
+      held; the aircraft has the same gap, with first-order lags on throttle and
+      elevator but no transport delay, and a real turbofan's 5-8 s spool-up is
+      flattered by a single lag. The difference is that the aircraft is a fast
+      plant given a slow task, so bandwidth is probably not what binds, and its
+      PID is nowhere near the ceiling. Measure before changing anything.
+
+* [ ] **Stop the controller models drifting from the plants.** Seven
+      environments give their MPC a separate symbolic re-implementation in
+      do-mpc rather than differentiating ``step_env``. That is the right call
+      where a faithful symbolic model exists -- it buys a properly constrained
+      NLP instead of projected gradient descent, native DAE support for the
+      furnace's algebraic flame, and convergence in 15-20 sparse iterations
+      instead of 50 differentiated rollouts. What it costs is a second copy of
+      the plant, and the glass furnace's has now diverged from its environment
+      three separate times: an error band inherited from a deleted reward, a
+      regenerator coarsened without the observation changing, and batch charging
+      the controller does not know is pulsed. Nothing detects any of that. The
+      fix is a conformance check per environment: step both models from the same
+      state under the same input and assert the one-step predictions agree to a
+      stated tolerance, so a divergence is a test failure rather than a slow
+      loss of baseline quality.
+
+* [ ] **Derive the MPC error bands rather than choosing them one at a time.**
+      Every MPC objective normalises its tracking error by a per-plant band:
+      `tracking_band` on the four-tank, the distillation column, the pH loop and
+      now the glass furnace, `power_band` on the turbine and the battery,
+      `comfort_band`, `lime_band`, `reward_band`. The surrogate is deliberate
+      and measured -- the log-scaled reward's gradient decays like `1/e`, so the
+      pull toward the setpoint is weakest where the controller is furthest from
+      it, and a quadratic in the normalised error scored 341.9 against 172.1 for
+      the reward itself on the turbine. What is not deliberate is the *sizing*.
+
+      The glass furnace showed what that costs. Its band was `tracking_scale`,
+      40 K, inherited from the reward it had before the log-scaled one, and left
+      unread by the plant when the reward changed. With the loop operating at
+      about 1 K the tracking term was 6e-4 against an O(1) fuel penalty, so the
+      objective was nearly flat in the direction being scored: the MPC trailed
+      its own PID by 16% on 10 of 10 seeds and IPOPT needed 349 iterations a
+      step on the worst one. Re-sized to 10 K, with the controller's regenerator
+      coarsened at the same time, it runs 43x faster and beats the PID.
+
+      Measuring each band against the error its PID actually holds puts the
+      suite between 0.1x and 45x, with no convention visible. The pass is to
+      derive the band from the log reward's own discriminating region -- the
+      error at which the tracking term halves, which is a function of
+      `precision_floor` and the envelope both already declared -- and to check
+      each plant's against it. Two rows of that comparison, the battery and the
+      turbine, first need their tracked observation expressed in physical units
+      rather than normalised ones, or the ratio means nothing.
+
+* [ ] **Stronger model-based baselines: scenario and oracle MPC.**
+      Scoped in [certainty-equivalence-study.md](certainty-equivalence-study.md),
+      which is the detail; this is the summary and the ordering.
+
+      The point is that "RL beats MPC" is a weak claim when the MPC is
+      deterministic. Replacing the disturbance by its mean is exactly optimal
+      under LQG assumptions and breaks on constraints, non-quadratic costs,
+      nonlinearity and the value of information. Inserting a scenario MPC
+      between the two splits the gap into *the value of accounting for
+      uncertainty* and *what is left for learning*, and an oracle MPC given the
+      disturbance realisation in advance gives the achievable ceiling, so a
+      good policy can be told apart from a nearly-saturated problem.
+
+      The scoping found the plants are already stochastic, and that the house
+      convention of deriving noise as `fold_in(key, state.time)` makes a
+      realisation a pure function of key and time, independent of the actions.
+      That makes the oracle arm nearly free on the JAX planners. In rough
+      order of effort:
+
+      - [ ] **Distributional metrics.** The point of the study is that the
+        *mean* is where certainty equivalence looks fine, and nothing here
+        reports a tail. `runners.rollout` already returns what IAE, overshoot
+        and settling time need; violation rate and quantiles do not exist. Ten
+        seeds is also thin for a tail.
+      - [ ] **Oracle arm on `SamplingMPC`.** Thread the evaluation key into
+        `_score` instead of the fixed `PRNGKey(0)`. Watch the reactor: its
+        demand keys off `state.demand_key`, carried in the state, so any
+        planner rolling out `step_env` is *already* a demand oracle whether or
+        not that was intended.
+      - [ ] **Scenario arm on `SamplingMPC`.** A vmap over K disturbance keys
+        and a mean, on top of the vmap over action samples it already does.
+        Then a decision about whether to average the objective or use a risk
+        measure.
+      - [ ] **True-model planners for pH, glass furnace and reactor.** The real
+        cost, and the finding that most changes the plan: on three of the four
+        priority environments the shipped MPC is a hand-written CasADi model,
+        not the simulator, so "it cannot be model error" does not hold today.
+        `SamplingMPC` needs only an objective, and it needs no gradients, which
+        matters because pH's bisection solve and the furnace's implicit gas
+        solve are both gradient risks and the kiln's adjoint already overflows.
+      - [ ] **Decide what the deterministic arm actually is.** The gradient and
+        sampling planners pass a fixed `PRNGKey(0)` into the true dynamics, so
+        they plan against one specific wrong disturbance trajectory rather than
+        the mean. Documented in `baselines.md` as it stands. Whether planning
+        on the mean controls better has not been measured, and changing it
+        invalidates every baseline, so measure first.
+      - [ ] **An asymmetric reward variant**, if mechanism 2 is to be isolated
+        cleanly rather than merely present. Every reward here is symmetric in
+        the error, including the cement kiln's free lime; they are all
+        non-quadratic, which is the condition that actually matters, so the
+        effect is observable without this. Free lime is the defensible
+        candidate (high is a quality rejection, low merely wastes fuel) and
+        would need `PHYSICS.md` justification, a version bump and a re-record.
+      - [ ] **Assert the reactor's stochastic demand.** It is excluded from
+        `disturbance_fields` deliberately and correctly, since that field means
+        a zero-mean plant disturbance and this is a drifting setpoint. The
+        consequence is that nothing asserts the process at all. It wants its
+        own check rather than a registry edit.
+      - [ ] **An observation-augmentation wrapper**, if the action-queue
+        hypothesis is to be tested. No environment's observation carries any
+        history of past actions, only current actuator positions, against
+        transport delays of up to 25 minutes on the kiln. There is no frame
+        stacking and no wrapper; the aircraft's `observe_wind` is
+        constructor-level and specific to that plant.
+
+      **Do the fingerprint-scoping item above first.** Adding a planner to
+      `experts/mpc.py` invalidates all twenty recorded baselines and costs a
+      nine-to-eleven hour re-record, purely because the fingerprint hashes the
+      file whole rather than the definitions an environment reaches.
+
 * [ ] **Host the documentation.** `docs/` is written and its examples are
       executed by the suite, but it is read as Markdown on GitHub. A GitHub
       Pages site (MkDocs Material) would give it navigation, search and a
       versioned URL, built and deployed from the same workflow that tests it.
 * [ ] **Publish RL baseline results.** The environments claim a learned policy
       has something real to beat; no learned policy's numbers are published yet.
-      The harness is in place -- `data/rl_results.json`, written through
+      The harness is in place: `data/rl_results.json`, written through
       `target_gym.rl_results.record_result` and guarded by a fingerprint of the
       environment, so a result recorded before a reward or dynamics change is
       refused rather than quoted. Training runs outside this package (the
       dependency goes RL-library-to-here, never the reverse); see
-      [docs/rl-baselines.md](docs/rl-baselines.md).
+      [rl-baselines.md](rl-baselines.md).
+
+      **Do this last, after the environments are frozen.** That fingerprint is
+      the reason for the ordering. It covers each environment's own modules plus
+      the shared physics, so any change to an environment, the integrator or the
+      shared reward helper invalidates every result recorded against it. A
+      training run is the most expensive artefact this project produces and the
+      easiest to invalidate by accident. Everything else on this list should
+      land first, including the outstanding baseline gaps, since re-tuning a
+      controller is cheap and re-running the whole RL grid is not.
+
+      **Compute plan: the TPU Research Cloud.** Free access to Cloud TPUs for
+      researchers, JAX among the supported frameworks, rolling applications with
+      no review committee, and quota granted on accepting the invitation. The
+      condition is publishing the work, which this project does anyway. It fits
+      because Ajax is JAX-native and these environments run on the accelerator
+      beside the agent, so a rollout never leaves the device.
+
+      What that costs is not the TPUs, which are free, but the surrounding
+      Google Cloud resources: a boot disk per TPU VM, a storage bucket and
+      egress. The artefacts here are learning curves, final returns and small
+      MLP checkpoints rather than datasets, so 10-20 GB covers it and storage is
+      well under a euro a month. Boot disks dominate: roughly 10 EUR a month for
+      five TPU VMs on small standard disks, nearer 40 if left on the default
+      100 GB balanced disks or run wide on preemptibles. Budget 10-50 EUR a
+      month and delete idle VMs, since a disk bills while it exists even
+      stopped. Keep the bucket in the TPU's own region so reads are free.
+
+      **Size of the grid**, from the protocol: 21 environments x 2 headline
+      algorithms x 3 arms x 3 budgets is 396 vmapped configurations, and seeds
+      vmap almost for free, so 30 seeds costs about what one does. Summing the
+      budgets gives roughly 44 billion environment steps for the reported runs,
+      plus about 8 billion for the hyperparameter search at 64 trials x 3 seeds.
+      The 1e7 budget is around 90% of that total, and the SAC arm at 1.0
+      gradient steps per environment step is far more expensive than PPO.
+
+      **One measurement is missing before any of this can be scheduled.** The
+      seed-scaling figure quoted in the protocol and in `rl-baselines.md`, 15.8 s
+      for one seed against 18.4 s for a hundred, has no step budget attached to
+      it, so it cannot be scaled into a wall-clock estimate. Running Ajax on one
+      environment at the 1e6 budget with 30 seeds and recording steps per second
+      turns the rest into arithmetic, and decides whether this is one month of
+      quota or three.
 * [x] **Drop the git dependency on `gymnax`.** Gone, and it turned out not to be
       needed. The pin tracked upstream `main` on the reasoning that released
       gymnax 1.0.0 caps `gymnasium<1.2` and that "conflicts with newer
-      gymnasium" -- but nothing in this project requires newer gymnasium. It
+      gymnasium", but nothing in this project requires newer gymnasium. It
       declares `gymnasium>=1.1,<1.4`, and 1.1.1 satisfies that. Resolving from
       PyPI alone gives gymnax 1.0.0 with gymnasium 1.1.1, on which the whole
       suite passes unchanged: 1225 fast, 69 slow, same four and two xfails.
@@ -51,7 +413,7 @@ what is broken and recorded rather than hidden.
       Two restructurings were measured and rejected: vectorising the aircraft's
       three aerodynamic calls into one is 0.76x, and `donate_argnums` on the
       batched rollout does nothing (the carried state is 0.26 MB). The remaining
-      slow environments are honestly slow -- distillation needs 16 substeps
+      slow environments are honestly slow, since distillation needs 16 substeps
       across 41 stages for stability, the cement kiln sweeps 16 zones in
       sequence.
 
@@ -59,7 +421,7 @@ what is broken and recorded rather than hidden.
       across identical trials, so every number here is a min of many; a
       single-shot measurement produced a confident and wrong conclusion partway
       through this work. And the pass found a *correctness* bug while looking for
-      speed -- see the integration order note below -- which is the main reason
+      speed (see the integration order note below), which is the main reason
       it was worth doing.
 
       The table's throughput column has since been re-measured with
@@ -80,7 +442,7 @@ what is broken and recorded rather than hidden.
       150 steps, against a reward that resolves to 1 m.
 * [x] **Apply the model review checklist to the other environments.** The
       aircraft work produced twelve checks in
-      [docs/model-review-checklist.md](docs/model-review-checklist.md), derived
+      [model-review-checklist.md](model-review-checklist.md), derived
       from real defects rather than from good intentions. All twelve have now
       been run across all eighteen environments.
 
@@ -88,7 +450,7 @@ what is broken and recorded rather than hidden.
       had missed; check 9 found the bank-commanded loop gain varies 2.38x on the
       figure-8, and that removing it changes nothing measurable; check 10's own
       advice cleared the integrator in one run. The circle's path-following
-      failure turned out not to be a guidance fault at all -- a third of its
+      failure turned out not to be a guidance fault at all. A third of its
       radius range is unflyable at the cruise speed its autopilot holds, and
       trading speed for radius took the worst seed from 1860 m to 73 m, closing
       half of a long-standing strict xfail. Check 12 exists because the first
@@ -98,7 +460,7 @@ what is broken and recorded rather than hidden.
       Checks 5, 7 and 8 each needed a plant-agnostic form to be run at all, and
       each needed its first metric discarded. Check 5 is now done by autodiff:
       comparing the two one-sided Jacobians of a step tells a kink from a steep
-      curve, which comparing sample-to-sample steps cannot -- that ranked
+      curve, which comparing sample-to-sample steps cannot. That ranked
       Arrhenius above every real seam. Check 7 became an unforced run, with
       linear growth separated from accelerating growth so that an aircraft is
       not flagged for flying forwards. Both come back clean: no plant produces
@@ -107,36 +469,55 @@ what is broken and recorded rather than hidden.
       at 308 m/s that full actuator travel cannot reach.
 
       Checks 3, 4, 5, 7 and 8 now run in
-      [the conformance suite](tests/test_env_conformance.py) against every
+      [the conformance suite](https://github.com/YannBerthelot/TargetGym/blob/main/tests/test_env_conformance.py) against every
       registered environment, each with an allowlist so it reports *new*
       defects rather than restating known-benign ones. A new environment
       inherits them by adding one line to the registry.
 * [x] **A reward-shaping phase.** The rewards had been written per environment as
-      each was added, and the conventions had drifted -- Gaussian versus
+      each was added, and the conventions had drifted: Gaussian versus
       quadratic tracking terms, differing crash penalties, differing treatment
       of the target band, and four environments whose reward was *identically
       zero* across the first three halvings of their error. All eighteen now
       share one contract: `(tracking terms, multiplied) x (1 - weighted costs)`,
       bounded in `[0, 1]`, log-scaled around a floor taken from each plant's own
       instrumentation. Costs multiply rather than subtract, so nothing is earned
-      without tracking and no episode can profit by ending early -- which made
+      without tracking and no episode can profit by ending early, which made
       the flat crash penalties redundant, and they are gone. See
-      [docs/reward-shaping.md](docs/reward-shaping.md).
+      [reward-shaping.md](reward-shaping.md).
 * [ ] **Move off the Alpha classifier** once the others above are settled.
 
 ### Documentation debt
 
-* [ ] **Action labels for eight environments.** The generated environment pages
-      read action meanings out of each environment's own class docstring, from
-      lines like `Action (2): [fuel, feedwater], raw in [-1, 1]`. Ten of the
-      eighteen have one; the other eight show bounds with a blank meaning,
-      because inventing labels in the generator would put words in the
-      environment's mouth on a reference page. The fix is at the source: add the
-      line to the eight docstrings, and the pages pick it up on the next
-      regeneration.
+* [x] **Action labels for eight environments.** ~~Eleven of twenty-two pages
+      showed action bounds with a blank meaning column.~~ Done, and the original
+      diagnosis was only half right. It was not simply eight missing docstring
+      lines: four public environment classes (`CSTR`, `FirstOrderSystem`,
+      `FourTank`, `GlassFurnace`) had no class docstring at all, `Airplane2D`
+      had one without an action line, and three more (`PHNeutralization`,
+      `BuildingHVAC`, `GridBattery`) documented their action perfectly well in
+      a spelling the generator could not read. Those write
+      `Action (1,): base flow, raw in [-1, 1]`, with the meaning *before* the
+      bracket, and the parser took the first `[` on the line, read the range
+      `-1, 1` as two labels, and matched no single-action environment. So the
+      fix was at both ends: docstrings at the source, and a parser that reads
+      both spellings. All twenty-two now carry labels. A few still read as
+      variable names rather than meanings (`rho_ext_norm`, `pitch_raw`,
+      `L_raw`), which is the environment's own wording and a smaller,
+      separate tidy.
 
-* [ ] **Wire the page generators into the test suite.** `docs/environments.md`
-      already has a sync test. `scripts/generate_env_pages.py --check` and
+* [x] **Wire the page generators into the test suite.** ~~`docs/environments.md`
+      already has a sync test.~~ Done, as a `docs` CI job that runs both
+      generators' `--check` and `mkdocs build --strict`, mirrored by
+      `make ci-docs`. It runs as its own job, concurrent with the interpreter
+      matrix, so it costs runner minutes but no wall-clock against the ten
+      minute budget. It found real drift immediately: both new environment
+      pages missing from the nav, twenty-five dangling links (every
+      `src/**/PHYSICS.md` and `CONTRIBUTING.md` reference resolves on GitHub
+      but 404s on the built site), and mkdocs itself absent from `uv.lock`
+      entirely, so the docs were only buildable on a machine that had installed
+      it out of band. The original text follows.
+
+      `scripts/generate_env_pages.py --check` and
       `scripts/generate_env_reference.py --check` should both run in CI so a
       parameter change cannot leave eighteen environment pages quietly
       disagreeing with the code. The check costs seconds; the failure mode it
@@ -144,16 +525,16 @@ what is broken and recorded rather than hidden.
 
 ### Known gaps
 
-The test suite records these rather than hiding them -- five `strict` xfail
-cases, from two markers, plus the patrol baseline notes above:
+The test suite records these rather than hiding them, as `strict` xfail cases
+from two markers, plus the patrol baseline notes above:
 
 * **Plane Patrol expert quality**: both patrol variants now ship a PID, but it
   completes roughly half of evaluation seeds. The failure is a lateral bank
   oscillation that sets in once the follower overshoots *ahead* of the slot
   chasing a steeply descending lead: pursuit guidance then commands a turn the
   bank loop cannot make, and it rings between its limits. No lateral gain
-  combination clears it, so the guidance law needs energy management -- the
-  follower cannot shed speed in a descent -- rather than further tuning.
+  combination clears it, so the guidance law needs energy management (the
+  follower cannot shed speed in a descent) rather than further tuning.
 * **Four-tank zero is fixed**: the real apparatus is celebrated for letting you
   move the multivariable zero across the imaginary axis by turning two valves.
   Here `gamma1` and `gamma2` are constants, so only the non-minimum-phase

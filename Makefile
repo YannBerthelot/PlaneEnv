@@ -24,7 +24,7 @@ install:  ## Create/refresh the dev environment (.venv) with uv
 # Canonical local-CI -- mirrors .github/workflows/python-app.yml exactly.
 # ---------------------------------------------------------------------------
 
-ci: ci-lint ci-format-check ci-test  ## Full local CI (matches .github/workflows/python-app.yml)
+ci: ci-lint ci-format-check ci-docs ci-test  ## Full local CI (matches .github/workflows/python-app.yml)
 
 ci-lint:  ## Ruff over the tree, the same set CI enforces
 	uv run --frozen --only-group lint ruff check src/ tests/ scripts/
@@ -32,6 +32,12 @@ ci-lint:  ## Ruff over the tree, the same set CI enforces
 ci-format-check:  ## Black --check on the whole tree
 	# --only-group lint installs black alone: formatting needs no runtime deps.
 	uv run --frozen --only-group lint black --check .
+
+ci-docs:  ## Generated pages are current and the site builds with no dangling links
+	uv run python scripts/generate_env_reference.py --check
+	uv run python scripts/generate_env_pages.py --check
+	uv run python scripts/stamp_env_versions.py --check
+	uv run mkdocs build --strict
 
 # -n auto spreads the suite over every core; tests/conftest.py holds each
 # worker to one compute thread so they do not fight over them. Pass -n0 to

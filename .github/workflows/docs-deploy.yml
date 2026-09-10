@@ -1,0 +1,70 @@
+# Publishes docs/ to GitHub Pages. Building and checking the site is the `docs`
+# job in python-app.yml, which runs on every pull request; this workflow only
+# adds the deploy, so a broken link still fails review rather than reaching the
+# published site. The build is repeated here rather than shared, because
+# passing an artifact between workflows costs more than the minute it takes to
+# rebuild.
+
+name: docs-deploy
+
+on:
+  push:
+    branches: [ "main" ]
+  # So the site can be republished without a commit, which is what you want the
+  # first time Pages is switched on and after any settings change.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Pages allows one deployment at a time. Unlike the CI workflow this does not
+# cancel what is in flight: cancelling a half-finished deploy is how a site ends
+# up serving a partial build.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  UV_VERSION: "0.11.28"
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v5
+      with:
+        version: ${{ env.UV_VERSION }}
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Install dependencies
+      # mkdocstrings imports the package to read its docstrings, so this needs
+      # the runtime as well as the docs group.
+      run: uv sync --frozen --group dev --group docs
+
+    - name: Build the site
+      run: uv run mkdocs build --strict
+
+    - uses: actions/upload-pages-artifact@v3
+      with:
+        path: site
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+    - id: deployment
+      uses: actions/deploy-pages@v4

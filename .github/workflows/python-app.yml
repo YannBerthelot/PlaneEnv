@@ -42,6 +42,48 @@ jobs:
     - name: Check formatting with Black
       run: uv run --frozen --only-group lint black --check .
 
+  docs:
+    # The documentation is generated from the registry, so it can go stale
+    # silently: docs/environments.md and the twenty-two per-environment pages
+    # are written by scripts, and every count and table in them comes from the
+    # code. Nothing checked that until this job existed, and it drifted --
+    # pages missing from the nav, links to files outside the docs tree that
+    # resolve on GitHub but 404 on the built site, and a hand-typed
+    # "eighteen environments" that survived four new environments.
+    #
+    # Its own job rather than a step on the test matrix: it runs concurrently
+    # with the interpreters, so it adds runner minutes but no wall-clock.
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON: "3.13"
+    steps:
+    - uses: actions/checkout@v4
+    - uses: astral-sh/setup-uv@v5
+      with:
+        version: ${{ env.UV_VERSION }}
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Install dependencies
+      # The generators import every environment, so this needs the runtime as
+      # well as the docs group.
+      run: uv sync --frozen --group dev --group docs
+
+    - name: Check the generated pages are current
+      run: |
+        uv run python scripts/generate_env_reference.py --check
+        uv run python scripts/generate_env_pages.py --check
+
+    - name: Check no environment changed without a version bump
+      run: uv run python scripts/stamp_env_versions.py --check
+
+    - name: Build the site
+      # --strict turns a dangling link into a failure. Without it the build
+      # reported twenty-five warnings and still exited zero.
+      run: uv run mkdocs build --strict
+
   test:
     # Every interpreter in the project's requires-python window. The columns
     # run concurrently, so covering four of them costs runner minutes but not

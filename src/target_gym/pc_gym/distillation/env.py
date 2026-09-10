@@ -91,7 +91,17 @@ class DistillationParams(EnvParams):
     # fraction is the scale on which this column is actually operated.
     tracking_band: float = 0.02
     precision_floor: float = 1e-4  # mole fraction, online analyser resolution
-    boilup_cost_weight: float = 0.05  # reboiler duty is the running cost
+    # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
+    # A running cost is a real part of every one of these plants, but its
+    # weight against tracking accuracy is a design decision this library has
+    # not earned yet, and an arbitrary one turns a tracking benchmark into a
+    # multi-objective problem whose Pareto point nobody chose. The glass
+    # furnace showed the cost of getting it wrong: its MPC sat 6 K cold with
+    # fuel at minimum 80% of the time, because a 0.1 fuel weight against a
+    # quadratic tracking surrogate made that the optimum of the objective it
+    # was given. The field and the term stay, so a weight can be restored
+    # once there is a defensible way to set it. See docs/roadmap.md.
+    boilup_cost_weight: float = 0.0  # was 0.05  # reboiler duty is the running cost
 
     # ---- Targets ----
     target_yD_range: Tuple[float, float] = (0.980, 0.995)

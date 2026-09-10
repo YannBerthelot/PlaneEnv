@@ -114,7 +114,17 @@ class BatteryParams(EnvParams):
     # limit and full-power current = 0.0081. Worst observed in rollout: 0.0229.
     max_step_cost: float = 0.03
     # Fraction of the tracking reward the worst-case cost may discount away.
-    cost_weight: float = 0.1
+    # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
+    # A running cost is a real part of every one of these plants, but its
+    # weight against tracking accuracy is a design decision this library has
+    # not earned yet, and an arbitrary one turns a tracking benchmark into a
+    # multi-objective problem whose Pareto point nobody chose. The glass
+    # furnace showed the cost of getting it wrong: its MPC sat 6 K cold with
+    # fuel at minimum 80% of the time, because a 0.1 fuel weight against a
+    # quadratic tracking surrogate made that the optimum of the objective it
+    # was given. The field and the term stay, so a weight can be restored
+    # once there is a defensible way to set it. See docs/roadmap.md.
+    cost_weight: float = 0.0  # was 0.1
     degradation_weight: float = 2.0e5  # scales fractional fade into reward units
     soc_comfort_weight: float = 0.10  # gentle pull toward mid charge
 

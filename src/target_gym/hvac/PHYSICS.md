@@ -125,7 +125,7 @@ setback 17 °C. Recovery from setback takes hours against a 43 h time constant,
 so a controller that waits for the setpoint step is already late. This is the
 structural gap MPC exploits and PID cannot close.
 
-**Reward** `clip(1 − |err|/(2·comfort_band), 0, 1)² − energy_weight·(Q/Q_max)`.
+**Reward** `log_scaled_reward(|err|, precision_floor, envelope) − energy_weight·(Q/Q_max)`, with `energy_weight = 0` for the 0.6 line so the reward scores comfort alone. The energy term stays wired and raising the weight restores the trade; see the roadmap item on framing running cost.
 The clip matters: without it the quadratic turns back upward past
 `2·comfort_band` and *rewards* large errors — a bug that made the first MPC
 stop heating entirely.

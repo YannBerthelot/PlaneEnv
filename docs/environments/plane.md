@@ -1,14 +1,15 @@
-# Plane
+# Altitude hold
 
-<p align="center"><img src="../videos/plane/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/plane/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|
 | Action space | `Box((2,))`, all actions in [-1, 1] |
-| Observation space | `Box((9,))` |
+| Observation space | `Box((10,))` |
 | Tracked variable(s) | altitude (m) |
 | Episode length | 280 steps (280 s at dt = 1 s) |
 | Import | `from target_gym import Airplane2D, PlaneParams` |
+| Cite as | `plane-v1` |
 
 ## Action space
 
@@ -17,17 +18,17 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
-| 1 |  | -1 | 1 |
+| 0 | power | -1 | 1 |
+| 1 | stick | -1 | 1 |
 
 ## Observation space
 
-9 values. Indices (1,) carry the tracked variable(s) that the
+10 values. Indices (1,) carry the tracked variable(s) that the
 reward scores.
 
 ## Rewards
 
-Return reward for a given state. Safe for JIT.
+Log-scaled altitude tracking, optionally coupled to an airspeed hold.
 
 Every environment in this suite scores on one contract: the reward is
 `(tracking terms, multiplied) x (1 - weighted costs)`, bounded in
@@ -51,7 +52,7 @@ Measured over 10 seeds on a 280-step episode (see [Baselines](../baselines.md)):
 | controller | return | per step |
 |---|---|---|
 | PID | 170.7 | 0.609 |
-| MPC | 205.4 | 0.734 |
+| MPC | 212.8 | 0.760 |
 
 ## Arguments
 
@@ -71,5 +72,5 @@ Measured over 10 seeds on a 280-step episode (see [Baselines](../baselines.md)):
 | `specific_fuel_consumption` | 0.0175 |
 | `cl_alpha` | 0.08786 |
 | `cl0` | 0.2 |
-| … | 39 more, see the params dataclass |
+| … | 43 more, see the params dataclass |
 

@@ -1,6 +1,6 @@
-# Hvac
+# Building HVAC
 
-<p align="center"><img src="../videos/hvac/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/hvac/pid_output.gif" width="480px"/></p>
 
 Building HVAC — single thermal zone, ISO 13790 5R1C reduced-order model.
 
@@ -11,6 +11,7 @@ Building HVAC — single thermal zone, ISO 13790 5R1C reduced-order model.
 | Tracked variable(s) | zone air temperature (deg C) |
 | Episode length | 720 steps (648000 s at dt = 900 s) |
 | Import | `from target_gym import BuildingHVAC, HVACParams` |
+| Cite as | `hvac-v1` |
 
 ## Action space
 
@@ -19,7 +20,7 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
+| 0 | commanded heating power | -1 | 1 |
 
 ## Observation space
 

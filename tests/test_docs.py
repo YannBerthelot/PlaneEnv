@@ -126,3 +126,37 @@ def test_readme_states_the_right_number_of_physics_contracts():
         f"README says {word} ({_NUMBER_WORDS[word]}) contracts, "
         f"but there are {actual} PHYSICS.md files"
     )
+
+
+def test_the_colab_notebook_still_runs():
+    """Execute the quickstart notebook's code cells.
+
+    The notebook is the first thing a new user runs, and it is the example most
+    likely to rot silently: it lives outside `docs/`, so the fenced-block runner
+    above never sees it, and nobody notices a broken cell until a reader hits
+    it. This session alone changed the plane's observation width and moved the
+    quickstart from `step_env` to `step`, either of which would have broken it.
+
+    The install cell is skipped, since the package under test is the one already
+    importable here.
+    """
+    import json
+
+    nb = json.loads((ROOT / "notebooks" / "quickstart.ipynb").read_text())
+    sources = [
+        "".join(cell["source"]) for cell in nb["cells"] if cell["cell_type"] == "code"
+    ]
+    body = [src for src in sources if not src.lstrip().startswith("!pip")]
+    assert body, "no runnable cells found in the notebook"
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    namespace: dict = {"__name__": "__notebook__"}
+    for i, src in enumerate(body):
+        try:
+            exec(compile(src, f"<notebook cell {i}>", "exec"), namespace)
+        except Exception as exc:  # pragma: no cover - the failure is the point
+            raise AssertionError(
+                f"notebooks/quickstart.ipynb cell {i} failed: {exc}\n\n{src}"
+            ) from exc

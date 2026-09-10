@@ -1,17 +1,15 @@
-# 3D heading
+# Altitude and airspeed
 
-<p align="center"><img src="../videos/plane3d_heading/pid_output.gif" width="480px"/></p>
-
-3D airplane environment state, parameters, and transition logic.
+<p align="center"><img src="../videos/plane_energy/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|
-| Action space | `Box((3,))`, all actions in [-1, 1] |
-| Observation space | `Box((15,))` |
+| Action space | `Box((2,))`, all actions in [-1, 1] |
+| Observation space | `Box((10,))` |
 | Tracked variable(s) | altitude (m) |
-| Episode length | 200 steps (200 s at dt = 1 s) |
-| Import | `from target_gym import Plane3DHeading, PlaneParams3D` |
-| Cite as | `plane3d_heading-v1` |
+| Episode length | 1200 steps (1200 s at dt = 1 s) |
+| Import | `from target_gym import Airplane2D, PlaneParams` |
+| Cite as | `plane_energy-v1` |
 
 ## Action space
 
@@ -22,16 +20,15 @@ actuator range inside the environment.
 |---|---|---|---|
 | 0 | power | -1 | 1 |
 | 1 | stick | -1 | 1 |
-| 2 | aileron | -1 | 1 |
 
 ## Observation space
 
-15 values. Indices (2,) carry the tracked variable(s) that the
+10 values. Indices (1,) carry the tracked variable(s) that the
 reward scores.
 
 ## Rewards
 
-See the environment's `compute_reward`.
+Log-scaled altitude tracking, optionally coupled to an airspeed hold.
 
 Every environment in this suite scores on one contract: the reward is
 `(tracking terms, multiplied) x (1 - weighted costs)`, bounded in
@@ -40,29 +37,29 @@ Every environment in this suite scores on one contract: the reward is
 
 ## Starting state
 
-`reset` samples the initial condition and the target; state has 27 fields.
+`reset` samples the initial condition and the target; state has 17 fields.
 
 ## Episode end
 
-**Termination.** See `check_is_terminal`.
+**Termination.** Return True if the episode should terminate.
 
-**Truncation.** After 200 steps.
+**Truncation.** After 1200 steps.
 
 ## Baselines
 
-Measured over 10 seeds on a 200-step episode (see [Baselines](../baselines.md)):
+Measured over 10 seeds on a 2400-step episode (see [Baselines](../baselines.md)):
 
 | controller | return | per step |
 |---|---|---|
-| PID | 19.6 | 0.098 |
-| MPC | 121.4 | 0.607 |
+| PID | 1200.4 | 0.500 |
+| MPC | 1564.8 | 0.652 |
 
 ## Arguments
 
 | parameter | default |
 |---|---|
 | `delta_t` | 1 |
-| `max_steps_in_episode` | 200 |
+| `max_steps_in_episode` | 1200 |
 | `gravity` | 9.81 |
 | `initial_mass` | 73500 |
 | `thrust_output_at_sea_level` | 240000 |
@@ -73,7 +70,7 @@ Measured over 10 seeds on a 200-step episode (see [Baselines](../baselines.md)):
 | `C_z0` | 0.9 |
 | `initial_fuel_quantity` | 19088 |
 | `specific_fuel_consumption` | 0.0175 |
-| `power_response_rate` | 0.05 |
-| `stick_response_rate` | 0.9 |
-| … | 50 more, see the params dataclass |
+| `cl_alpha` | 0.08786 |
+| `cl0` | 0.2 |
+| … | 43 more, see the params dataclass |
 

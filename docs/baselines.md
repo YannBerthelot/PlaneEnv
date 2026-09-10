@@ -22,7 +22,7 @@ mpc.reset()
 
 ## Coverage
 
-All eighteen environments ship a PID. Sixteen also ship an MPC; the two
+All twenty-one environments ship a PID. Nineteen also ship an MPC; the two
 `patrol` variants do not, and `EnvSpec.baselines_note` records why -- the
 follower's plant is the full 3D aircraft and its reference is a *manoeuvring
 lead*, so an MPC needs the lead's future trajectory as a time-varying
@@ -123,7 +123,7 @@ Three implementations, chosen per environment by what its dynamics allow:
 | Implementation | Used by | When it applies |
 |---|---|---|
 | `CasadiMPC` subclasses | 7 environments | A direct nonlinear program over an explicit model; the sharpest when the model can be written in CasADi |
-| `GradientMPC` | 8 environments | Differentiates the JAX dynamics directly and descends the objective |
+| `GradientMPC` | 11 environments | Differentiates the JAX dynamics directly and descends the objective |
 | `SamplingMPC` | cement kiln | Cross-entropy sampling, for when gradients are unusable |
 
 The cement kiln uses sampling because its adjoint overflows: half its response
@@ -134,6 +134,44 @@ An MPC objective must share the **minimiser** of the environment's reward, not
 its shape. A reward with a flat or clipped region is fine to score against but
 useless to descend, so the MPC objectives are written to be smooth where the
 reward is not.
+
+### Three things to know before quoting an MPC number
+
+These are properties of the baselines as they stand, not defects being hidden.
+They matter because they all inflate the MPC side of the comparison below, and
+a reader deciding whether their own controller is competitive needs them.
+
+**The MPC sees the full simulator state. The PID sees only the observation.**
+Every planner's entry point is `step(obs, state)` with `obs` ignored, and
+`runners.mpc_policy` hands it the state object. So on the pH CSTR the MPC reads
+the reaction invariants `Wa` and `Wb`; on the glass furnace it reads the glass
+and checker temperatures and the pull-rate disturbance; on the reactor it reads
+the xenon and iodine inventories and the fuel temperature. Those are exactly
+the quantities each environment hides on purpose, and several environments are
+built as genuine POMDPs on the strength of that. The PID, and any learned
+policy, gets the observation vector alone. **The table below is therefore not a
+controller-class comparison at equal information**, and part of every MPC lead
+is the hidden state rather than the planning.
+
+**The gradient and sampling planners do not plan on the mean disturbance.**
+Both roll the true environment forward internally, and the environments derive
+their process noise as `fold_in(key, state.time)`. The planners pass a fixed
+`PRNGKey(0)`, so they simulate one specific pseudo-random disturbance
+trajectory, consistent across an episode and unrelated to the realisation the
+environment will actually produce. That is neither certainty equivalence, which
+would use the mean, nor a robust or scenario formulation. It has not been
+measured against the alternatives; it is recorded here so nobody assumes
+otherwise from the word "MPC".
+
+**The CasADi objectives are quadratic proxies, not the environment's reward.**
+The shipped rewards are log-scaled and clip to zero outside the tracking band,
+which is fine to be scored on and useless to descend: on the pH CSTR, IPOPT
+optimised the only term with a live gradient, the reagent cost, railed the
+valve shut and settled at about 3.9 pH of mean error. The proxies share the
+reward's minimiser and have a usable gradient everywhere. The consequence is
+that these controllers are not optimising the quantity they are scored on, and
+because the reward is not quadratic, the plan that minimises the proxy is not
+in general the plan that maximises expected reward.
 
 MPC rollouts are expensive, so episodes are cached under `data/mpc_cache/`:
 
@@ -341,6 +379,10 @@ across that change, so the previous table was discarded rather than patched.
 
 Both the mean and the median are given. They disagree on two rows, in opposite
 directions, and either one alone would misreport the pair.
+
+Read this alongside the three caveats above. The MPC has the full state and the
+PID does not, so this is a comparison of two controllers with different
+information, not two controllers with different algorithms.
 
 | environment | mean | median | seeds won |
 | --- | --- | --- | --- |

@@ -7,24 +7,24 @@ hide:
 
 <p align="center">
   <b>Reach a setpoint. Hold it forever. Against disturbances.</b><br/>
-  Eighteen JAX environments for <i>target MDPs</i> — the control problems industry actually has.
+  Twenty-two JAX environments for <i>target MDPs</i>, the control problems industry actually has.
 </p>
 
 <p align="center">
-  <img src="videos/mosaic_plants.webp" width="100%"/><br/>
-  <sub>Twelve process, industrial and energy plants, each held on setpoint by its shipped PID baseline.</sub>
+  <img src="videos/mosaic_flagship.webp" width="100%"/><br/>
+  <sub>One from each family, held on setpoint by its shipped PID baseline.</sub>
 </p>
 
-<p align="center">
-  <img src="videos/mosaic_aircraft.webp" width="100%"/><br/>
-  <sub>Eight aircraft tasks: altitude hold, step schedules, sinusoid tracking, and three 3D paths.</sub>
-</p>
+**21 environments**: 9 aircraft, 5 process control, 5 industrial / energy, 2 renewable energy. Every one of them is in the
+[gallery](environments.md), with its own page, clip and baseline numbers.
 
 ---
 
 ```bash
 pip install target-gym
 ```
+
+Or try it in the browser: [Colab quickstart](https://colab.research.google.com/github/YannBerthelot/TargetGym/blob/main/notebooks/quickstart.ipynb).
 
 ```python
 import jax
@@ -33,7 +33,7 @@ from target_gym import Plane, PlaneParams
 from target_gym.registry import REGISTRY
 
 env, params = Plane(), PlaneParams()
-obs, state = env.reset_env(jax.random.PRNGKey(0), params)
+obs, state = env.reset(jax.random.PRNGKey(0), params)
 
 # Every environment ships a tuned expert, so a learned policy
 # has something real to beat.
@@ -42,21 +42,22 @@ pid.reset()
 
 for t in range(200):
     action = np.atleast_1d(pid(obs))
-    obs, state, reward, terminated, truncated = env.step_env(
+    obs, state, reward, terminated, truncated, info = env.step(
         jax.random.PRNGKey(t), state, action, params
     )
+    if terminated or truncated:
+        break
 ```
 
-[Browse the eighteen environments →](environments.md){ .md-button .md-button--primary }
+[Browse the twenty-one environments →](environments.md){ .md-button .md-button--primary }
 [Getting started →](getting-started.md){ .md-button }
 
 ---
 
 ## Why these environments
 
-Reaching a goal and stopping is not what industrial control is. Holding a
-setpoint against disturbances, forever, is — and that changes which failure
-modes matter:
+Holding a setpoint forever breaks differently than reaching a goal once, and
+these are the failure modes that come with it:
 
 | | |
 |---|---|
@@ -67,8 +68,8 @@ modes matter:
 | **Multi-timescale** | Millisecond neutronics against hour-long xenon; sub-second flame gas against 30 h glass residence |
 | **Finite budgets** | A battery whose tracking *now* costs the ability to track later |
 
-Every environment ships a tuned PID, and sixteen of eighteen also ship an MPC,
-so a learned policy has something real to beat — and **where a baseline is weak,
+Every environment ships a tuned PID, and nineteen of twenty-one also ship an MPC,
+so a learned policy has something real to beat. And **where a baseline is weak,
 the docs say how weak**.
 
 ## Documentation
@@ -96,7 +97,7 @@ the docs say how weak**.
 
 - **Contribute**
 
-    [Contributing](../CONTRIBUTING.md) ·
+    [Contributing](https://github.com/YannBerthelot/TargetGym/blob/main/CONTRIBUTING.md) ·
     [Roadmap and known gaps](roadmap.md) ·
     [Functional structure](functional-structure.md)
 

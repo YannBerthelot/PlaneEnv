@@ -35,26 +35,28 @@ import numpy as np  # noqa: E402
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from target_gym.registry import REGISTRY  # noqa: E402
+from target_gym.registry import REGISTRY, display_name  # noqa: E402
 
 OUT_DIR = ROOT / "docs" / "environments"
 BASELINES = ROOT / "data" / "baseline_returns.json"
 
 # Where each environment's gif lives, relative to the repository root. Only
 # environments with a rendered clip get a picture; the rest simply omit it.
-VIDEO_CANDIDATES = (
-    "videos/{name}/pid_output_short.gif",
-    "videos/{name}/pid_output.gif",
-)
-# ``target_gym.runners.runners`` writes videos/<env>/pid_output.gif, so that is
-# the path a page should use. This map is only for environments whose clip is
-# shared with another -- the two patrol variants render the same formation --
-# and it deliberately no longer points at videos/plane3d/*_short.gif, which were
-# hand-placed leftovers of an older layout that no generator refreshes. Those
-# went stale silently: the gallery showed pre-re-skin aircraft for a week.
-SPECIAL_VIDEOS = {
-    "patrol_bearing_only": "videos/patrol/pid_output.gif",
-}
+VIDEO_CANDIDATES = ("videos/{name}/pid_output.gif",)
+# One candidate, deliberately: whatever ``target_gym.runners.runners`` writes.
+#
+# This used to prefer a hand-placed ``*_short.gif`` and fall back to the
+# generated clip, and the comment here already recorded that going wrong once --
+# "the gallery showed pre-re-skin aircraft for a week". It went wrong the same
+# way a second time. Thirteen pages were still showing shorts that no generator
+# refreshes, so after the aircraft renderers were unified the gallery was split
+# between two visual styles, and the glass furnace's short played for 1.8 s
+# against the 9.8 s of every regenerated clip.
+#
+# A fallback chain whose first entry nothing maintains is a trap, so there is no
+# chain now. If a page has no picture, that is because no clip was rendered for
+# it, which is a fact worth seeing rather than papering over.
+SPECIAL_VIDEOS: dict[str, str] = {}
 
 
 def _video(name: str) -> str | None:
@@ -96,14 +98,29 @@ def _action_labels(env, n: int) -> list[str]:
     """
     doc = type(env).__doc__ or ""
     for line in doc.splitlines():
-        if "ction" not in line or "[" not in line:
+        if "ction" not in line or "):" not in line:
             continue
-        start = line.index("[")
-        stop = line.find("]", start)
-        if stop < 0:
-            continue
-        inside = line[start + 1 : stop]
-        parts = [x.strip() for x in inside.split(",") if x.strip()]
+        # Everything after the arity marker. Two spellings are in use and both
+        # are read here: the bracketed list the aircraft carry,
+        #   Action (3,): [power, stick, aileron] each in [-1, 1]
+        # and the prose form the process plants carry,
+        #   Action (1,): base flow, raw in [-1, 1] -> [q3_min, q3_max]
+        # The earlier version took the first "[" on the line, which on the
+        # second spelling is the *range* -- so it read "-1, 1" as two labels,
+        # matched no single-action environment, and left eleven of twenty-two
+        # pages with a blank meaning column.
+        text = line.split("):", 1)[1].strip()
+        for cut in (", raw in", " raw in", " each in", "->"):
+            at = text.find(cut)
+            if at >= 0:
+                text = text[:at]
+        text = text.strip().rstrip(",").strip()
+        if text.startswith("["):
+            stop = text.find("]")
+            if stop < 0:
+                continue
+            text = text[1:stop]
+        parts = [x.strip() for x in text.split(",") if x.strip()]
         if len(parts) == n:
             return parts
     return []
@@ -158,6 +175,17 @@ def _baseline_section(name: str, spec) -> str:
             lines.append(f"| MPC | {mpc:.1f} | {mpc / steps:.3f} |")
     else:
         lines.append("A tuned PID ships with this environment.")
+    # Both degradation notes are surfaced, not just the MPC's. The homepage
+    # promises that "where a baseline is weak, the docs say how weak", and a
+    # weak *expert* is the case that misleads hardest: a reader who beats it
+    # concludes they beat a tuned controller. Rendered in full rather than
+    # truncated at the first period -- these notes carry the measured numbers
+    # that make the gap checkable, and the first sentence alone drops them.
+    if spec.expert_degraded:
+        lines.append(
+            f'\n!!! warning "The shipped expert is weak here"\n'
+            f"    {spec.expert_degraded}"
+        )
     if spec.mpc_degraded:
         lines.append(
             f'\n!!! warning "The MPC is not an upper bound here"\n'
@@ -186,7 +214,7 @@ def page(name: str, spec) -> str:
     except Exception:
         labels = []
 
-    title = name.replace("_", " ").title()
+    title = display_name(name)
     video = _video(name)
     dt = float(getattr(params, "delta_t", 1.0))
     episode = int(params.max_steps_in_episode)
@@ -209,6 +237,7 @@ def page(name: str, spec) -> str:
         f"| Episode length | {episode} steps ({episode * dt:g} s at dt = {dt:g} s) |",
         f"| Import | `from target_gym import {type(env).__name__}, "
         f"{type(params).__name__}` |",
+        f"| Cite as | `{spec.versioned_name}` |",
         "",
         "## Action space",
         "",

@@ -8,7 +8,7 @@ pip install target-gym
 uv add target-gym
 ```
 
-Python 3.11 through 3.14. For development, see [CONTRIBUTING](../CONTRIBUTING.md).
+Python 3.11 through 3.14. For development, see [CONTRIBUTING](https://github.com/YannBerthelot/TargetGym/blob/main/CONTRIBUTING.md).
 
 ## An episode, directly
 

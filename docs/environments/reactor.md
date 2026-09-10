@@ -1,6 +1,6 @@
 # Reactor
 
-<p align="center"><img src="../videos/reactor/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/reactor/pid_output.gif" width="480px"/></p>
 
 Nuclear reactor — point-kinetics with delayed neutrons, xenon poisoning, thermal feedback, and rate-limited control rods.
 
@@ -11,6 +11,7 @@ Nuclear reactor — point-kinetics with delayed neutrons, xenon poisoning, therm
 | Tracked variable(s) | neutron power (normalised) |
 | Episode length | 1200 steps (1200 s at dt = 1 s) |
 | Import | `from target_gym import Reactor, ReactorParams` |
+| Cite as | `reactor-v1` |
 
 ## Action space
 

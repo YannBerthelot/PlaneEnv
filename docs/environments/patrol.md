@@ -1,4 +1,6 @@
-# Patrol
+# Patrol - MARL formation
+
+<p align="center"><img src="../videos/patrol/pid_output.gif" width="480px"/></p>
 
 Close-patrol (formation-keeping) environment: state, parameters and transition.
 
@@ -9,6 +11,7 @@ Close-patrol (formation-keeping) environment: state, parameters and transition.
 | Tracked variable(s) | slot error (m) |
 | Episode length | 200 steps (200 s at dt = 1 s) |
 | Import | `from target_gym import PlanePatrol, PatrolParams` |
+| Cite as | `patrol-v1` |
 
 ## Action space
 

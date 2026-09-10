@@ -1,6 +1,6 @@
-# Ph Neutralization
+# pH neutralisation
 
-<p align="center"><img src="../videos/ph_neutralization/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/ph_neutralization/pid_output.gif" width="480px"/></p>
 
 pH neutralisation — CSTR with acid, buffer and base streams.
 
@@ -11,6 +11,7 @@ pH neutralisation — CSTR with acid, buffer and base streams.
 | Tracked variable(s) | pH |
 | Episode length | 300 steps (1500 s at dt = 5 s) |
 | Import | `from target_gym import PHNeutralization, PHParams` |
+| Cite as | `ph_neutralization-v1` |
 
 ## Action space
 
@@ -19,7 +20,7 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
+| 0 | base flow | -1 | 1 |
 
 ## Observation space
 

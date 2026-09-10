@@ -1,6 +1,6 @@
 # Distillation
 
-<p align="center"><img src="../videos/distillation/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/distillation/pid_output.gif" width="480px"/></p>
 
 Binary distillation — Skogestad's "Column A".
 
@@ -11,6 +11,7 @@ Binary distillation — Skogestad's "Column A".
 | Tracked variable(s) | yD (mole fraction) |
 | Episode length | 200 steps (200 s at dt = 1 s) |
 | Import | `from target_gym import DistillationColumn, DistillationParams` |
+| Cite as | `distillation-v1` |
 
 ## Action space
 

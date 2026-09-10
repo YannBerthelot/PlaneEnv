@@ -1,6 +1,6 @@
 # Cement Kiln
 
-<p align="center"><img src="../videos/cement_kiln/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/cement_kiln/pid_output.gif" width="480px"/></p>
 
 Cement rotary kiln — 1-D axial model with counter-current gas.
 
@@ -11,6 +11,7 @@ Cement rotary kiln — 1-D axial model with counter-current gas.
 | Tracked variable(s) | discharge free lime (%) |
 | Episode length | 700 steps (21000 s at dt = 30 s) |
 | Import | `from target_gym import CementKiln, CementKilnParams` |
+| Cite as | `cement_kiln-v1` |
 
 ## Action space
 

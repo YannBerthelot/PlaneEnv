@@ -1,17 +1,17 @@
-# 3D heading
+# 3D holding pattern
 
-<p align="center"><img src="../videos/plane3d_heading/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../videos/plane3d_racetrack/pid_output.gif" width="480px"/></p>
 
 3D airplane environment state, parameters, and transition logic.
 
 | | |
 |---|---|
 | Action space | `Box((3,))`, all actions in [-1, 1] |
-| Observation space | `Box((15,))` |
+| Observation space | `Box((21,))` |
 | Tracked variable(s) | altitude (m) |
-| Episode length | 200 steps (200 s at dt = 1 s) |
-| Import | `from target_gym import Plane3DHeading, PlaneParams3D` |
-| Cite as | `plane3d_heading-v1` |
+| Episode length | 650 steps (650 s at dt = 1 s) |
+| Import | `from target_gym import Plane3DRacetrack, PlaneParams3D` |
+| Cite as | `plane3d_racetrack-v1` |
 
 ## Action space
 
@@ -26,7 +26,7 @@ actuator range inside the environment.
 
 ## Observation space
 
-15 values. Indices (2,) carry the tracked variable(s) that the
+21 values. Indices (2,) carry the tracked variable(s) that the
 reward scores.
 
 ## Rewards
@@ -46,23 +46,23 @@ Every environment in this suite scores on one contract: the reward is
 
 **Termination.** See `check_is_terminal`.
 
-**Truncation.** After 200 steps.
+**Truncation.** After 650 steps.
 
 ## Baselines
 
-Measured over 10 seeds on a 200-step episode (see [Baselines](../baselines.md)):
+Measured over 10 seeds on a 900-step episode (see [Baselines](../baselines.md)):
 
 | controller | return | per step |
 |---|---|---|
-| PID | 19.6 | 0.098 |
-| MPC | 121.4 | 0.607 |
+| PID | 275.0 | 0.306 |
+| MPC | 574.4 | 0.638 |
 
 ## Arguments
 
 | parameter | default |
 |---|---|
 | `delta_t` | 1 |
-| `max_steps_in_episode` | 200 |
+| `max_steps_in_episode` | 650 |
 | `gravity` | 9.81 |
 | `initial_mass` | 73500 |
 | `thrust_output_at_sea_level` | 240000 |

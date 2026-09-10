@@ -1,4 +1,6 @@
-# Patrol Bearing Only
+# Patrol - MARL, bearing-only
+
+<p align="center"><img src="../videos/patrol_bearing_only/pid_output.gif" width="480px"/></p>
 
 Close-patrol (formation-keeping) environment: state, parameters and transition.
 
@@ -9,6 +11,7 @@ Close-patrol (formation-keeping) environment: state, parameters and transition.
 | Tracked variable(s) | measured range (m) |
 | Episode length | 200 steps (200 s at dt = 1 s) |
 | Import | `from target_gym import PlanePatrolBearingOnly, PatrolParams` |
+| Cite as | `patrol_bearing_only-v1` |
 
 ## Action space
 

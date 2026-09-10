@@ -1,6 +1,6 @@
 # Boiler Drum
 
-<p align="center"><img src="../videos/boiler_drum/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/boiler_drum/pid_output.gif" width="480px"/></p>
 
 Boiler drum — natural-circulation drum boiler with shrink-and-swell.
 
@@ -11,6 +11,7 @@ Boiler drum — natural-circulation drum boiler with shrink-and-swell.
 | Tracked variable(s) | drum level (m), drum pressure (bar) |
 | Episode length | 400 steps (800 s at dt = 2 s) |
 | Import | `from target_gym import BoilerDrum, BoilerDrumParams` |
+| Cite as | `boiler_drum-v1` |
 
 ## Action space
 

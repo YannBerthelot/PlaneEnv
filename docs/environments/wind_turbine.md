@@ -1,6 +1,6 @@
 # Wind Turbine
 
-<p align="center"><img src="../videos/wind_turbine/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/wind_turbine/pid_output.gif" width="480px"/></p>
 
 Wind turbine — NREL 5 MW reference turbine, collective-pitch power regulation.
 
@@ -11,6 +11,7 @@ Wind turbine — NREL 5 MW reference turbine, collective-pitch power regulation.
 | Tracked variable(s) | electrical power (MW) |
 | Episode length | 400 steps (100 s at dt = 0.25 s) |
 | Import | `from target_gym import WindTurbine, WindTurbineParams` |
+| Cite as | `wind_turbine-v1` |
 
 ## Action space
 
@@ -53,7 +54,7 @@ Measured over 10 seeds on a 400-step episode (see [Baselines](../baselines.md)):
 | controller | return | per step |
 |---|---|---|
 | PID | 331.8 | 0.829 |
-| MPC | 343.6 | 0.859 |
+| MPC | 344.1 | 0.860 |
 
 ## Arguments
 

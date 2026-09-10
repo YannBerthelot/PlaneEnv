@@ -1,6 +1,6 @@
 # Battery
 
-<p align="center"><img src="../videos/battery/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/battery/pid_output.gif" width="480px"/></p>
 
 Grid battery storage — equivalent-circuit Li-ion pack tracking a dispatch signal.
 
@@ -11,6 +11,7 @@ Grid battery storage — equivalent-circuit Li-ion pack tracking a dispatch sign
 | Tracked variable(s) | delivered power (MW) |
 | Episode length | 360 steps (1800 s at dt = 5 s) |
 | Import | `from target_gym import GridBattery, BatteryParams` |
+| Cite as | `battery-v1` |
 
 ## Action space
 
@@ -19,7 +20,7 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
+| 0 | power | -1 | 1 |
 
 ## Observation space
 
@@ -52,7 +53,7 @@ Measured over 10 seeds on a 360-step episode (see [Baselines](../baselines.md)):
 | controller | return | per step |
 |---|---|---|
 | PID | 160.8 | 0.447 |
-| MPC | 174.8 | 0.486 |
+| MPC | 174.6 | 0.485 |
 
 ## Arguments
 

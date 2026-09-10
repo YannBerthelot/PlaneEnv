@@ -1,4 +1,4 @@
-# Plane3D Circle
+# 3D circle
 
 <p align="center"><img src="../videos/plane3d_circle/pid_output.gif" width="480px"/></p>
 
@@ -9,8 +9,9 @@
 | Action space | `Box((3,))`, all actions in [-1, 1] |
 | Observation space | `Box((17,))` |
 | Tracked variable(s) | altitude (m) |
-| Episode length | 800 steps (800 s at dt = 1 s) |
+| Episode length | 300 steps (300 s at dt = 1 s) |
 | Import | `from target_gym import Plane3DCircle, PlaneParams3D` |
+| Cite as | `plane3d_circle-v1` |
 
 ## Action space
 
@@ -45,7 +46,7 @@ Every environment in this suite scores on one contract: the reward is
 
 **Termination.** See `check_is_terminal`.
 
-**Truncation.** After 800 steps.
+**Truncation.** After 300 steps.
 
 ## Baselines
 
@@ -61,7 +62,7 @@ Measured over 10 seeds on a 800-step episode (see [Baselines](../baselines.md)):
 | parameter | default |
 |---|---|
 | `delta_t` | 1 |
-| `max_steps_in_episode` | 800 |
+| `max_steps_in_episode` | 300 |
 | `gravity` | 9.81 |
 | `initial_mass` | 73500 |
 | `thrust_output_at_sea_level` | 240000 |

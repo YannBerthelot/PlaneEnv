@@ -1,6 +1,6 @@
-# First Order
+# First order
 
-<p align="center"><img src="../videos/first_order/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/first_order/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|
@@ -9,6 +9,7 @@
 | Tracked variable(s) | x |
 | Episode length | 100 steps (5 s at dt = 0.05 s) |
 | Import | `from target_gym import FirstOrderSystem, FirstOrderParams` |
+| Cite as | `first_order-v1` |
 
 ## Action space
 
@@ -17,7 +18,7 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
+| 0 | input | -1 | 1 |
 
 ## Observation space
 

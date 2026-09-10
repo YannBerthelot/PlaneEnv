@@ -1,6 +1,6 @@
-# Cstr
+# CSTR
 
-<p align="center"><img src="../videos/cstr/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/cstr/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|
@@ -9,6 +9,7 @@
 | Tracked variable(s) | C_a (mol/L) |
 | Episode length | 100 steps (25 s at dt = 0.25 s) |
 | Import | `from target_gym import CSTR, CSTRParams` |
+| Cite as | `cstr-v1` |
 
 ## Action space
 
@@ -17,7 +18,7 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
+| 0 | coolant temperature | -1 | 1 |
 
 ## Observation space
 

@@ -1,6 +1,6 @@
 # Glass Furnace
 
-<p align="center"><img src="../videos/glass_furnace/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/glass_furnace/pid_output.gif" width="480px"/></p>
 
 Glass furnace (float-glass process) — regenerative end-port fired furnace.
 
@@ -11,6 +11,7 @@ Glass furnace (float-glass process) — regenerative end-port fired furnace.
 | Tracked variable(s) | crown temperature (K) |
 | Episode length | 1600 steps (48000 s at dt = 30 s) |
 | Import | `from target_gym import GlassFurnace, GlassFurnaceParams` |
+| Cite as | `glass_furnace-v1` |
 
 ## Action space
 
@@ -19,7 +20,7 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
+| 0 | fuel rate | -1 | 1 |
 
 ## Observation space
 
@@ -37,7 +38,7 @@ Every environment in this suite scores on one contract: the reward is
 
 ## Starting state
 
-`reset` samples the initial condition and the target; state has 14 fields.
+`reset` samples the initial condition and the target; state has 16 fields.
 
 ## Episode end
 
@@ -52,10 +53,10 @@ Measured over 10 seeds on a 1600-step episode (see [Baselines](../baselines.md))
 | controller | return | per step |
 |---|---|---|
 | PID | 1223.9 | 0.765 |
-| MPC | 1028.5 | 0.643 |
+| MPC | 991.8 | 0.620 |
 
 !!! warning "The MPC is not an upper bound here"
-    16.
+    Pending re-record.
 
 ## Arguments
 
@@ -68,12 +69,12 @@ Measured over 10 seeds on a 1600-step episode (see [Baselines](../baselines.md))
 | `excess_air` | 0.1 |
 | `c_p_air` | 1150 |
 | `c_p_gas` | 1200 |
-| `fuel_min` | 0.5 |
-| `fuel_max` | 0.68 |
+| `fuel_min` | 0.513 |
+| `fuel_max` | 0.698 |
 | `flame_rad_fraction` | 0.55 |
 | `C_regen_node` | 3e+07 |
 | `eps_regen_node` | 0.8 |
 | `reversal_period` | 1500 |
-| `U_regen` | 0.3 |
-| … | 38 more, see the params dataclass |
+| `reversal_dead_time` | 40 |
+| … | 46 more, see the params dataclass |
 

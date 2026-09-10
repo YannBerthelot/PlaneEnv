@@ -1,6 +1,6 @@
-# Four Tank
+# Four-tank
 
-<p align="center"><img src="../videos/four_tank/pid_output_short.gif" width="480px"/></p>
+<p align="center"><img src="../videos/four_tank/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|
@@ -9,6 +9,7 @@
 | Tracked variable(s) | h1 (m), h2 (m) |
 | Episode length | 500 steps (500 s at dt = 1 s) |
 | Import | `from target_gym import FourTank, FourTankParams` |
+| Cite as | `four_tank-v1` |
 
 ## Action space
 
@@ -17,8 +18,8 @@ actuator range inside the environment.
 
 | # | meaning | min | max |
 |---|---|---|---|
-| 0 |  | -1 | 1 |
-| 1 |  | -1 | 1 |
+| 0 | pump 1 voltage | -1 | 1 |
+| 1 | pump 2 voltage | -1 | 1 |
 
 ## Observation space
 

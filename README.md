@@ -20,7 +20,10 @@
 </p>
 
 **21 environments**: 9 aircraft, 5 process control, 5 industrial / energy,
-2 renewable energy. Every one ships with MPC, PID and RL baseline controllers.
+2 renewable energy. Every one ships a tuned PID, and nineteen an MPC as well,
+both recorded over ten episode seeds. Learned baselines are not published yet;
+what they will be measured against, and how, is in
+[docs/rl-protocol.md](docs/rl-protocol.md).
 
 **TargetGym** is a collection of JAX **reinforcement learning environments**
 built around [**target MDPs**](docs/target-mdp.md): tasks where you **reach a

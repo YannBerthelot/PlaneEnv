@@ -235,6 +235,17 @@ class GradientMPC:
 
         return jax.lax.fori_loop(0, self.n_iter, body, jnp.clip(actions_init, lb, ub))
 
+    def solver_report(self) -> dict:
+        """No external solver, so no convergence to report.
+
+        Part of the planner interface rather than a special case at the call
+        site: the recorder asks every controller for its solver health, and a
+        planner that has none should say so rather than raise. Leaving it off
+        cost a 44-minute record that crashed on the one sampling planner in the
+        suite after every other environment had already finished.
+        """
+        return {}
+
     def step(self, _obs, state):
         """Return next action. ``_obs`` is ignored (kept for API symmetry)."""
         actions_init = jnp.concatenate([self._actions[1:], self._actions[-1:]], axis=0)
@@ -252,6 +263,28 @@ class GradientMPC:
 # ============================================================================
 # CasADi MPC  — IPOPT-based, used for CSTR / FirstOrder / Nonsmooth / FourTank
 # ============================================================================
+
+
+# IPOPT defaults to 3000 iterations and no time limit. In a receding-horizon
+# loop that is not a safety net, it is a hang: one badly conditioned step can
+# run for half an hour while its neighbours take a tenth of a second, and the
+# episode never finishes. A real MPC has a sample period and returns the best
+# iterate it holds when the clock runs out, so ours does the same.
+#
+# The iteration cap is the one meant to bind. It is deterministic, so a
+# baseline recorded on one machine reproduces on another -- which a wall-clock
+# cap would not be, since a slower machine would record a different return.
+# ``max_cpu_time`` is only a backstop against a solve that is pathological
+# rather than merely hard, and sits far above anything a healthy step needs.
+IPOPT_MAX_ITER = 150
+IPOPT_MAX_CPU_TIME = 60.0
+
+# IPOPT return codes that mean "I stopped because you told me to", as opposed
+# to a genuine numerical failure. Both count as non-convergence; separating
+# them says whether the cap is doing the work or the problem is broken.
+_IPOPT_CAP_STATUSES = frozenset(
+    {"Maximum_Iterations_Exceeded", "Maximum_CpuTime_Exceeded"}
+)
 
 
 class CasadiMPC:
@@ -281,6 +314,15 @@ class CasadiMPC:
         # the env's delta_t to give a meaningful planning horizon).
         self.mpc_dt = float(mpc_dt) if mpc_dt is not None else float(params.delta_t)
         self._initialized = False
+        # Solver health, accumulated over every solve this controller performs.
+        # ``reset`` deliberately leaves these alone so one counter covers a
+        # whole rollout rather than the last episode of it.
+        self.solve_calls = 0
+        self.solve_iters = 0
+        self.solve_failures = 0
+        self.solve_capped = 0
+        self.last_return_status = ""
+        self._last_u = None
         self._mpc = self._build_mpc()
 
     # ------------------------------------------------------------------
@@ -308,13 +350,18 @@ class CasadiMPC:
             self._mpc.x0 = x0
             self._mpc.set_initial_guess()
             self._initialized = True
+        guess = self._save_guess()
         u = np.array(self._mpc.make_step(x0)).flatten()
+        if not self._record_solve():
+            u = self._fallback(guess, u)
+        self._last_u = u
         u_clipped = np.clip(u, -1.0, 1.0)
         return float(u_clipped[0]) if len(u_clipped) == 1 else u_clipped
 
     def reset(self):
         """Reset so that the next step re-initialises the warm-start."""
         self._initialized = False
+        self._last_u = None
 
     # ------------------------------------------------------------------
     # Shared do_mpc boilerplate
@@ -322,7 +369,109 @@ class CasadiMPC:
 
     @staticmethod
     def _quiet_ipopt():
-        return {"ipopt.print_level": 0, "print_time": 0, "ipopt.sb": "yes"}
+        return {
+            "ipopt.print_level": 0,
+            "print_time": 0,
+            "ipopt.sb": "yes",
+            "ipopt.max_iter": IPOPT_MAX_ITER,
+            "ipopt.max_cpu_time": IPOPT_MAX_CPU_TIME,
+        }
+
+    # ------------------------------------------------------------------
+    # Conditioning
+    # ------------------------------------------------------------------
+
+    #: Typical magnitude of each optimisation variable, by do-mpc kind.
+    #: Subclasses override; anything not named is left at 1.0.
+    SCALING: dict = {}
+
+    def _apply_scaling(self, mpc) -> None:
+        """Tell the solver what a unit is, before ``setup`` freezes the NLP.
+
+        IPOPT auto-scales the objective and the constraints, but not the
+        decision variables: step norms, bound handling and the warm start all
+        run in whatever units the model happens to use. Left alone, the reactor
+        hands it a vector spanning ``rho_ext`` around 0.0016 up to a precursor
+        concentration around 377 -- a factor of 605 000, measured over a PID
+        episode -- and puts hard bounds on the smallest entry of it. That is a
+        badly conditioned KKT system built out of nothing but unit choices, and
+        it shows up as iteration counts, which is what makes a seed take twenty
+        times its siblings.
+
+        The numbers below are means of ``|x|`` over a PID episode, rounded to
+        one figure. They only have to be the right order of magnitude.
+        """
+        for kind, entries in self.SCALING.items():
+            for var, value in entries.items():
+                mpc.scaling[kind, var] = float(value)
+
+    # ------------------------------------------------------------------
+    # Solver health
+    # ------------------------------------------------------------------
+
+    def _record_solve(self) -> bool:
+        """Fold the last solve's outcome into the running counters.
+
+        do-mpc neither raises nor warns when IPOPT gives up: it stores the
+        failed iterate, hands it back as the action, and warm-starts the next
+        step from it. Nothing downstream can tell that apart from a converged
+        solve, so an MPC baseline can quietly stop being an upper bound. These
+        counters are what ``solver_report`` publishes alongside the return.
+        """
+        stats = getattr(self._mpc, "solver_stats", None) or {}
+        self.solve_calls += 1
+        self.solve_iters += int(stats.get("iter_count", 0) or 0)
+        status = str(stats.get("return_status", ""))
+        capped = status in _IPOPT_CAP_STATUSES
+        if capped:
+            self.solve_capped += 1
+        if stats.get("success", True):
+            return True
+        self.solve_failures += 1
+        self.last_return_status = status
+        # A capped solve is still a usable answer: IPOPT was converging and we
+        # stopped it, which is the whole point of the cap. A solve that failed
+        # for any other reason -- infeasible, restoration failed, invalid
+        # number -- returns an iterate that means nothing, and do-mpc will warm
+        # start the next step from it and spread the damage.
+        return capped
+
+    def _save_guess(self):
+        """Snapshot the warm start, so a failed solve cannot poison the next.
+
+        The multipliers only exist once do-mpc has solved at least once, so
+        they are read defensively rather than assumed.
+        """
+        m = self._mpc
+        return {
+            k: np.array(v)
+            for k, v in (
+                ("opt_x", m.opt_x_num.master),
+                ("lam_g", getattr(m, "lam_g_num", None)),
+                ("lam_x", getattr(m, "lam_x_num", None)),
+            )
+            if v is not None
+        }
+
+    def _fallback(self, guess, u):
+        """Restore the last good warm start and hold the last good action."""
+        m = self._mpc
+        m.opt_x_num.master = guess["opt_x"]
+        for attr, key in (("lam_g_num", "lam_g"), ("lam_x_num", "lam_x")):
+            if key in guess:
+                setattr(m, attr, guess[key])
+        return u if self._last_u is None else self._last_u
+
+    def solver_report(self) -> dict:
+        """Convergence summary for the solves performed so far."""
+        calls = max(self.solve_calls, 1)
+        return {
+            "solver_calls": self.solve_calls,
+            "solver_failures": self.solve_failures,
+            "solver_capped": self.solve_capped,
+            "solver_mean_iters": round(self.solve_iters / calls, 1),
+            "solver_last_status": self.last_return_status,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +489,8 @@ class CSTRCasadiMPC(CasadiMPC):
         dC_a/dt = q/V*(Caf - C_a) - k0*exp(-EA/R/T)*C_a
         dT/dt   = q/V*(Ti - T) + (-ΔHr)*rA/(ρ·C) + UA*(T_c - T)/(ρ·C·V)
     """
+
+    SCALING = {"_x": {"C_a": 1.0, "T": 300.0}}
 
     def _build_mpc(self):
         p = self.params
@@ -386,6 +537,7 @@ class CSTRCasadiMPC(CasadiMPC):
             return p_tpl
 
         mpc.set_p_fun(p_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -446,6 +598,7 @@ class FirstOrderCasadiMPC(CasadiMPC):
             return p_tpl
 
         mpc.set_p_fun(p_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -470,6 +623,8 @@ class FourTankCasadiMPC(CasadiMPC):
     Inputs : [v1_raw, v2_raw] each ∈ [-1, 1]  →  [v1, v2] ∈ [v_min, v_max]
     ODE    : four-tank gravity-drain dynamics (see env.py)
     """
+
+    SCALING = {"_x": {"h1": 0.25, "h2": 0.25, "h3": 0.25, "h4": 0.25}}
 
     def _build_mpc(self):
         p = self.params
@@ -535,10 +690,35 @@ class FourTankCasadiMPC(CasadiMPC):
         mpc.bounds["upper", "_u", "v2_raw"] = 1.0
 
         # Keep levels above minimum to avoid sqrt(0)
-        mpc.bounds["lower", "_x", "h1"] = float(p.h_min)
-        mpc.bounds["lower", "_x", "h2"] = float(p.h_min)
-        mpc.bounds["lower", "_x", "h3"] = float(p.h_min)
-        mpc.bounds["lower", "_x", "h4"] = float(p.h_min)
+        # Both termination bounds, and soft.
+        #
+        # The plant does not clip these levels, it *ends the episode* when any
+        # of them reaches h_min or h_max. Only the lower bound was here, and it
+        # was hard, which is backwards on both counts. Hard was wrong because a
+        # hard bound the plant can walk the initial state onto makes the NLP
+        # infeasible at x0, and IPOPT answers that with a restoration phase and
+        # hundreds of iterations rather than an action. Missing h_max was worse:
+        # the controller was blind to half of a termination condition it is
+        # scored on, so it had no reason not to overflow a tank.
+        #
+        # Input bounds stay hard, because the optimiser owns those and can
+        # always satisfy them. State bounds get slacks, which is the usual
+        # division of labour.
+        for h in (h1, h2, h3, h4):
+            mpc.set_nl_cons(
+                f"{h.name()}_min",
+                -h,
+                ub=-float(p.h_min),
+                soft_constraint=True,
+                penalty_term_cons=1e3,
+            )
+            mpc.set_nl_cons(
+                f"{h.name()}_max",
+                h,
+                ub=float(p.h_max),
+                soft_constraint=True,
+                penalty_term_cons=1e3,
+            )
 
         self._target_h1 = float(p.target_h1_range[0])
         self._target_h2 = float(p.target_h2_range[0])
@@ -550,6 +730,7 @@ class FourTankCasadiMPC(CasadiMPC):
             return p_tpl
 
         mpc.set_p_fun(p_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -623,6 +804,18 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
     The setpoint schedule enters as a time-varying parameter so the MPC
     anticipates step changes -- the advantage PID structurally cannot have.
     """
+
+    SCALING = {
+        "_x": {
+            "T_crown": 1000.0,
+            "T_melt": 1000.0,
+            "T_work": 1000.0,
+            "m_batch": 10000.0,
+            **{f"T_rA{i}": 1000.0 for i in range(_FURNACE_MPC_REGEN_NODES)},
+            **{f"T_rB{i}": 1000.0 for i in range(_FURNACE_MPC_REGEN_NODES)},
+        },
+        "_z": {"T_gas": 2000.0},
+    }
 
     def _build_mpc(self):
         p = self.params
@@ -907,6 +1100,7 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -1048,6 +1242,23 @@ class ReactorCasadiMPC(CasadiMPC):
     raw physics step would model a control authority that does not exist.
     """
 
+    SCALING = {
+        "_x": {
+            "n": 1.0,
+            "C0": 100.0,
+            "C1": 400.0,
+            "C2": 100.0,
+            "C3": 70.0,
+            "C4": 5.0,
+            "C5": 0.8,
+            "T_fuel": 1000.0,
+            "T_coolant": 600.0,
+            "I_hat": 1.0,
+            "Xe_hat": 1.0,
+            "rho_ext": 0.002,
+        }
+    }
+
     def __init__(self, env, params, horizon: int = 20, mpc_dt: float = None):
         if mpc_dt is None:
             control_period = getattr(env, "control_period", 1)
@@ -1169,6 +1380,7 @@ class ReactorCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -1207,7 +1419,12 @@ class ReactorCasadiMPC(CasadiMPC):
             self._mpc.x0 = x0
             self._mpc.set_initial_guess()
             self._initialized = True
-        rho_rate = float(np.array(self._mpc.make_step(x0)).flatten()[0])
+        guess = self._save_guess()
+        u = np.array(self._mpc.make_step(x0)).flatten()
+        if not self._record_solve():
+            u = self._fallback(guess, u)
+        self._last_u = u
+        rho_rate = float(u[0])
 
         p = self.params
         rho_next = float(
@@ -1246,6 +1463,8 @@ class HVACCasadiMPC(CasadiMPC):
     afternoon. A PID sees none of that until it has already happened, and with
     a 43 h thermal time constant "already happened" is far too late.
     """
+
+    SCALING = {"_x": {"T_mass": 20.0, "Q_emitter": 800.0}}
 
     def __init__(self, env, params, horizon: int = 24, mpc_dt: float = None):
         super().__init__(
@@ -1355,6 +1574,7 @@ class HVACCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -1389,6 +1609,8 @@ class PHCasadiMPC(CasadiMPC):
     and leans on receding-horizon feedback to reject the drift -- the same
     treatment the glass furnace gives its pull-rate disturbance.
     """
+
+    SCALING = {"_x": {"Wa": 3e-4, "Wb": 3e-4}, "_z": {"pH": 7.0}}
 
     def __init__(self, env, params, horizon: int = 20, mpc_dt: float = None):
         super().__init__(
@@ -1471,6 +1693,7 @@ class PHCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -1497,7 +1720,11 @@ class PHCasadiMPC(CasadiMPC):
             self._mpc.z0 = np.array([float(state.pH)])
             self._mpc.set_initial_guess()
             self._initialized = True
+        guess = self._save_guess()
         u = np.array(self._mpc.make_step(x0)).flatten()
+        if not self._record_solve():
+            u = self._fallback(guess, u)
+        self._last_u = u
         return float(np.clip(u, -1.0, 1.0)[0])
 
 
@@ -1852,6 +2079,17 @@ class SamplingMPC:
             body, (mean, std, key), None, length=self.n_iter
         )
         return mean, std
+
+    def solver_report(self) -> dict:
+        """No external solver, so no convergence to report.
+
+        Part of the planner interface rather than a special case at the call
+        site: the recorder asks every controller for its solver health, and a
+        planner that has none should say so rather than raise. Leaving it off
+        cost a 44-minute record that crashed on the one sampling planner in the
+        suite after every other environment had already finished.
+        """
+        return {}
 
     def step(self, _obs, state):
         """Return the next action. ``_obs`` is ignored (kept for API symmetry)."""

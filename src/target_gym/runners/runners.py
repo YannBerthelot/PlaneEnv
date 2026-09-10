@@ -142,6 +142,110 @@ def rollout(spec, params, policy: Callable, seed: int = 0):
     return np.array(values), np.array(targets), np.array(rewards)
 
 
+def baseline_policy(spec, kind: str, params=None) -> Callable | None:
+    """A shipped baseline as one uniform ``(obs, state) -> action`` callable.
+
+    Both kinds take the same two arguments and return the same type, so a
+    single evaluation loop serves either, and a learned policy written to the
+    same shape drops straight in beside them.
+
+    The asymmetry underneath is deliberate and is *why* both signatures carry
+    both arguments rather than each taking what it happens to need. **The PID
+    ignores ``state``**: it reads the observation, as a plant controller does.
+    **The MPC ignores ``obs``**: it reads the true state, because it is
+    presented as a full-state upper bound rather than as a peer to a policy
+    that sees only what a plant instruments. Two different call shapes made
+    that easy to miss, and a benchmark whose ceiling quietly sees more than its
+    contestants is worth being loud about.
+
+    ``kind`` is ``"pid"`` or ``"mpc"``. Returns ``None`` when the environment
+    does not ship that baseline, which for the MPC is the two patrol variants.
+    """
+    if kind == "pid":
+        if not spec.has_pid:
+            return None
+        pid = spec.make_pid()
+        if hasattr(pid, "reset"):
+            pid.reset()
+        call = pid if callable(pid) else pid.step
+        return lambda obs, state=None: np.atleast_1d(call(obs))
+
+    if kind == "mpc":
+        if not spec.has_mpc:
+            return None
+        params = spec.make_test_params() if params is None else params
+        mpc = spec.make_mpc(spec.make_env(), params)
+        mpc.reset()
+        return lambda obs, state: np.atleast_1d(mpc.step(obs, state))
+
+    raise ValueError(f"kind must be 'pid' or 'mpc', not {kind!r}")
+
+
+def rollout_mpc_batch(spec, params, n_seeds: int):
+    """Run ``n_seeds`` MPC episodes at once, vmapped over the seed axis.
+
+    Only for ``GradientMPC``: its ``_optimize(actions_init, state)`` is already a
+    pure function of its two arguments, the warm start being the only thing the
+    object carries between steps, so it vmaps as it stands. The CasADi planners
+    cannot follow -- IPOPT is a solver outside JAX -- and are parallelised by
+    process instead.
+
+    This is the whole reason the recording was slow. Seeds are independent by
+    construction: different PRNG key, no shared state, ``reset()`` between them.
+    Running them one after another left thirteen of fourteen cores idle while
+    ``plane_energy`` took two hours.
+
+    Returns ``(values, targets, rewards, terminated)``: the first three with a
+    leading seed axis, matching what :func:`rollout` returns for one, and a
+    boolean per seed saying whether it ended early. Termination is tracked
+    rather than inferred from zero-padded rewards, because a legitimate reward
+    can be zero and ``mpc_terminated_early`` is a published field.
+    """
+    env = spec.make_env()
+    mpc = spec.make_mpc(env, params)
+    value_idx = _as_tuple(env.obs_value_index)
+    target_idx = _as_tuple(env.obs_target_index)
+    n_steps = int(params.max_steps_in_episode)
+
+    keys = jnp.stack([jax.random.PRNGKey(s) for s in range(n_seeds)])
+    obs, state = jax.jit(jax.vmap(env.reset_env, in_axes=(0, None)))(keys, params)
+    actions = jnp.zeros((n_seeds, mpc.horizon, mpc.action_dim))
+
+    optimize = jax.jit(jax.vmap(mpc._optimize, in_axes=(0, 0)))
+    step = jax.jit(jax.vmap(env.step_env, in_axes=(0, 0, 0, None)))
+
+    values, targets, rewards = [], [], []
+    alive = jnp.ones((n_seeds,), dtype=bool)
+    ended = jnp.zeros((n_seeds,), dtype=bool)
+    for _ in range(n_steps):
+        values.append(obs[:, list(value_idx)])
+        targets.append(obs[:, list(target_idx)])
+        # Shift the warm start by one and repeat the last action, exactly as
+        # ``GradientMPC.step`` does for a single episode.
+        actions = optimize(
+            jnp.concatenate([actions[:, 1:], actions[:, -1:]], axis=1), state
+        )
+        u = actions[:, 0]
+        if mpc.action_dim == 1:
+            u = u[:, 0]
+        obs, state, reward, terminated, _ = step(keys, state, u, params)
+        # A seed that has terminated stops earning. Its state keeps being
+        # stepped because the batch runs in lockstep, which is why the reward
+        # has to be masked rather than the loop broken.
+        rewards.append(jnp.where(alive, reward, 0.0))
+        ended = ended | (alive & terminated)
+        alive = alive & jnp.logical_not(terminated)
+        if not bool(jnp.any(alive)):
+            break
+
+    return (
+        np.asarray(jnp.stack(values, axis=1)),
+        np.asarray(jnp.stack(targets, axis=1)),
+        np.asarray(jnp.stack(rewards, axis=1)),
+        np.asarray(ended),
+    )
+
+
 def constant_policy(value, env, params) -> Callable:
     """A policy holding *value*, expressed as a fraction of the action range.
 
@@ -173,7 +277,15 @@ def mpc_policy(spec, env, params) -> Callable | None:
         return None
     mpc = spec.make_mpc(env, params)
     mpc.reset()
-    return lambda obs, state: np.atleast_1d(mpc.step(obs, state))
+
+    def policy(obs, state):
+        return np.atleast_1d(mpc.step(obs, state))
+
+    # The planner itself, so a caller can read its solver health afterwards.
+    # Without this the controller is captured in a closure and unreachable, and
+    # a CasADi baseline could be recorded from solves that never converged.
+    policy.controller = mpc
+    return policy
 
 
 # ---------------------------------------------------------------------------

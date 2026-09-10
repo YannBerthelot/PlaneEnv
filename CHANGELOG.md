@@ -79,6 +79,38 @@ than by commit.
 
 ### Fixed
 
+- **The MPC solver could hang, and nothing noticed.** IPOPT was left at its
+  default of 3000 iterations and no time limit, so a single badly conditioned
+  step could run for half an hour while its neighbours took a tenth of a
+  second: nine glass-furnace seeds finished in about three and a half minutes
+  each and the tenth was still going after seventy. `CasadiMPC` now caps
+  iterations at 150 and CPU time as a backstop, the way a controller with a
+  sample period has to. The iteration cap is deterministic, so a baseline
+  recorded on one machine still reproduces on another.
+- **A failed solve was indistinguishable from a converged one.** do-mpc neither
+  raises nor warns when IPOPT gives up: it stores the failed iterate, returns it
+  as the action, and warm-starts the next step from it. An MPC baseline could
+  therefore quietly stop being the upper bound it is presented as. Every record
+  now carries `solver_calls`, `solver_failures`, `solver_capped` and
+  `solver_mean_iters`, and a solve that failed for any reason other than the cap
+  makes the controller hold its previous action and restore its previous warm
+  start instead of planning from the wreckage.
+- **No CasADi MPC declared variable scaling.** IPOPT auto-scales the objective
+  and constraints but not the decision variables. The reactor was handing it a
+  vector spanning `rho_ext` around 0.0016 up to a precursor concentration around
+  377, a factor of 605 000, with hard bounds on the smallest entry of it. Each
+  subclass now declares a `SCALING` table of typical magnitudes.
+- **The four-tank MPC was blind to half a termination condition.** The plant
+  ends the episode when any level reaches `h_min` *or* `h_max`; the controller
+  bounded only `h_min`, and bounded it hard. Both bounds are now present and
+  soft, so the controller can see an overflow coming and a level that touches a
+  bound cannot make the NLP infeasible at `x0`.
+- **Recording lost everything when interrupted.** `scripts/record_baselines.py`
+  wrote its results once, after the loop, so a run that was killed threw away
+  every finished environment. It now checkpoints after each one, and runs
+  environments concurrently rather than one after another, so a slow seed holds
+  a single worker instead of stopping every other environment from starting.
+
 - **Four-tank**: the target range sat entirely above what the plant can reach,
   so every episode was unwinnable. The range, the loop pairing (the RGA puts
   λ11 at −0.067, so the loops must be crossed) and the tuner objective were all

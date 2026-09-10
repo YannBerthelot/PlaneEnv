@@ -5,20 +5,50 @@ real to beat. A benchmark whose only reference point is a random policy tells
 you an agent learned *something*; one with a tuned PID tells you whether it
 learned anything worth having.
 
-Reach a baseline through the registry rather than by importing a factory:
+## Calling a baseline like an agent
+
+Both baselines are available as one uniform callable, so a single evaluation
+loop serves the PID, the MPC and a learned policy written to the same shape:
 
 ```python
+import jax, numpy as np
 from target_gym.registry import REGISTRY
+from target_gym.runners.runners import baseline_policy
 
 spec = REGISTRY["cstr"]
-env, params = spec.make_env(), spec.params_cls()
+env, params = spec.make_env(), spec.make_test_params()
+policy = baseline_policy(spec, "pid", params)      # or "mpc", or your agent
 
-pid = spec.make_pid()
-pid.reset()
-
-mpc = spec.make_mpc(env, params)
-mpc.reset()
+obs, state = env.reset_env(jax.random.PRNGKey(0), params)
+total = 0.0
+for _ in range(int(params.max_steps_in_episode)):
+    action = policy(np.asarray(obs), state)
+    obs, state, reward, terminated, _ = env.step_env(
+        jax.random.PRNGKey(0), state, action, params
+    )
+    total += float(reward)
+    if bool(terminated):
+        break
 ```
+
+`baseline_policy` returns `None` where an environment does not ship that
+baseline, which for the MPC is the two `patrol` variants.
+
+**Both take `(obs, state)`, and the asymmetry underneath is the point.** The PID
+ignores `state`: it reads the observation, as a plant controller does. The MPC
+ignores `obs`: it reads the true state, because it is a full-state upper bound
+rather than a peer to a policy that sees only what a plant instruments. Giving
+each the signature it happens to need made that easy to miss, and a benchmark
+whose ceiling quietly sees more than its contestants should say so loudly.
+
+To compare your own agent, write it to the same shape and swap it in. Evaluate
+on the same episode seeds the baselines were recorded on, 0 to 9, which is what
+makes the comparison paired -- and means you can read the baseline numbers out
+of `data/baseline_returns.json` rather than paying to regenerate them.
+
+The underlying objects are reachable directly if you need them, through
+`spec.make_pid()` and `spec.make_mpc(env, params)`; both are stateful and want
+`reset()` between episodes.
 
 ## Coverage
 
@@ -127,6 +157,40 @@ Three implementations, chosen per environment by what its dynamics allow:
 | `SamplingMPC` | cement kiln | Cross-entropy sampling, for when gradients are unusable |
 
 
+### The MPC is not trained, and you can just run it
+
+It solves an optimisation problem online, from the current state, at every
+step. There are no learned parameters, so there is nothing that could be
+specific to an episode or a seed. What it has instead is a model, a horizon and
+solver settings, and an objective, all chosen once per environment the way a
+controller structure is. Between episodes it carries only a warm start, and on
+the glass furnace an offset-free bias integrator; `reset()` clears both.
+
+The irony is that the **PID** is the trained one here. Its gains come from a
+search on seeds 0 to 2 and are reported on held-out seeds. The MPC has never
+seen a seed before it runs.
+
+Four things to know before you use it.
+
+**It reads the true state, not the observation.** Quote it as a ceiling, not as
+an opponent: it knows the reactor's xenon inventory, the column's interior
+profile and the turbine's rotor-effective wind.
+
+**It is slow**, from 3 ms to 600 ms per step against environments that step in
+microseconds. A reference to measure against, not something to put inside a
+training loop.
+
+**It does not vmap or jit** on the CasADi plants, which call IPOPT, a solver
+outside JAX. The eleven `GradientMPC` environments do batch, which is how the
+recording parallelises across seeds.
+
+**`reset()` between episodes**, or the furnace's bias integrator carries a
+correction into an episode where it is a standing error.
+
+And you may not need to run it at all: `data/baseline_returns.json` holds ten
+seeds of both baselines per environment, on the same episodes an agent is
+evaluated on.
+
 ### Why the MPC does not minimise the reward
 
 Every MPC here optimises a **quadratic surrogate** in a per-plant error band,
@@ -217,6 +281,78 @@ MPC rollouts are expensive, so episodes are cached under `data/mpc_cache/`:
 ```bash
 make clear-mpc     # drop the MPC trajectory cache
 ```
+
+### The solver is capped, and every record says how often the cap bit
+
+IPOPT ships with a limit of 3000 iterations and no time limit at all. In a
+receding-horizon loop that is not a safety net, it is a hang. One badly
+conditioned step runs for half an hour while its neighbours take a tenth of a
+second, and the episode never ends. It happened here: nine glass-furnace seeds
+finished in about three and a half minutes each and the tenth was still going
+after seventy, holding up a whole re-record.
+
+A real MPC has a sample period and returns the best iterate it holds when the
+clock runs out, so `CasadiMPC` does the same. `IPOPT_MAX_ITER` is 150, against a
+healthy furnace step that converges in 21 iterations and a worst healthy step of
+38. The iteration cap is the one meant to bind, because it is deterministic: a
+baseline recorded on one machine reproduces on another, which a wall-clock cap
+could not promise. `IPOPT_MAX_CPU_TIME` is a backstop against a solve that is
+pathological rather than merely hard, and sits far above anything a healthy step
+needs.
+
+Capping alone would not be enough, because do-mpc neither raises nor warns when
+IPOPT gives up. It stores the failed iterate, hands it back as the action, and
+warm-starts the next step from it, so nothing downstream can tell a failure from
+a converged solve. An MPC baseline can therefore quietly stop being an upper
+bound. Every record now carries the count:
+
+| field | meaning |
+| --- | --- |
+| `solver_calls` | solves performed across all seeds |
+| `solver_failures` | solves that did not reach a converged status |
+| `solver_capped` | of those, the ones stopped by the iteration or time cap |
+| `solver_mean_iters` | mean IPOPT iterations per solve |
+
+A capped solve is still applied: IPOPT was converging and we stopped it, which
+is the whole point. Any *other* failure -- infeasible, restoration failed,
+invalid number -- returns an iterate that means nothing, so the controller holds
+its previous action and restores the previous warm start rather than planning
+from the wreckage.
+
+Read `solver_failures` before quoting a number. All seven CasADi environments
+currently record 100%.
+
+### Conditioning, constraints, and what is deliberately absent
+
+Three related pieces of standard MPC practice, and where this suite stands on
+each.
+
+**Variable scaling.** IPOPT auto-scales the objective and the constraints but
+not the decision variables, so step norms, bound handling and the warm start all
+run in whatever units the model happens to use. Left alone the reactor handed it
+a vector spanning `rho_ext` around 0.0016 up to a precursor concentration around
+377, a factor of 605 000 measured over a PID episode, with hard bounds on the
+smallest entry. Every `CasadiMPC` subclass now declares a `SCALING` table of
+typical magnitudes, taken from the mean of `|x|` over a PID episode and rounded
+to one figure.
+
+**Hard bounds on inputs, soft bounds on states.** The optimiser owns the inputs
+and can always satisfy their bounds, so those stay hard. A state bound is a
+different animal: the initial state comes from the plant, and if the plant walks
+it onto the bound the NLP is infeasible at `x0` and IPOPT answers with a
+restoration phase and hundreds of iterations instead of an action. Most
+environments cannot reach that -- the reactor clips `rho_ext` to its bounds and
+the pH plant bisects its algebraic variable on `[0, 14]` -- but the four-tank
+does not clip, it *ends the episode* when a level touches `h_min` or `h_max`.
+Those two bounds are now soft, and `h_max` is now present at all; before this the
+controller was blind to half of a termination condition it is scored on.
+
+**No terminal ingredients.** `mterm` is the stage cost everywhere, so there is
+no terminal cost or terminal set and therefore no nominal stability guarantee
+in the Mayne sense. These horizons are long relative to the closed-loop
+transient they have to cover, which is checked separately by
+`scripts/audit_mpc_horizons.py`, and the baselines are measured rather than
+certified. It is recorded here so nobody assumes the guarantee exists.
 
 ### Horizons, and which ones are too short
 
@@ -372,9 +508,13 @@ Subtle objective errors are below its resolution; this table is what finds
 them. Those three percentages were measured under the previous reward and have
 not been re-derived -- reverting each fix again costs hours and would restate a
 conclusion about the contract's *resolution*, which the reward change does not
-alter. Two aircraft are recorded as `EnvSpec.mpc_degraded` and
-xfail with their measured reasons, so a known gap is explicit rather than
-absent.
+alter. One environment is recorded as `EnvSpec.mpc_degraded` and xfails
+with its measured reason, so a known gap is explicit rather than absent. It is
+the battery: its MPC loses to its own PID on 9 of 10 seeds and its mean leads
+only on the strength of seed 0, which scores 350.4 against 154.7 for the other
+nine. The registry entry records what that is *not* -- not the fixed
+`PRNGKey(0)` the planners use for disturbances, since every other stochastic
+environment has a seed-0 ratio near 1.0, and not the initial condition either.
 
 ## What a longer episode exposed
 
@@ -383,27 +523,32 @@ Lengthening the benchmark episodes to satisfy
 [the RL protocol](rl-protocol.md) -- immediately found a defect that the short
 ones had been hiding, which is the argument for having done it.
 
-The **glass furnace MPC is 16.0% behind its PID over ten seeds and loses on 10
+The **glass furnace MPC was 16.0% behind its PID over ten seeds and lost on 10
 of 10.** At the previous 240-step episode the two scored within 1.3% and the
-contract passed. Split into deciles they are *identical* over the first half of
+contract passed. Split into deciles they were *identical* over the first half of
 a 1600-step episode -- both still on their way to the setpoint, which is all the
-old episode ever measured -- and from the sixth the PID converges to 0.0-0.5 K
-of crown-temperature error while the MPC plateaus at 2-6 K.
+old episode ever measured -- and from the sixth the PID converged to 0.0-0.5 K
+of crown-temperature error while the MPC plateaued at 2-6 K.
 
-That is a steady-state offset with a structural cause. `_extract_x0` collapses
-the plant's two four-node regenerator chambers onto the model's three nodes by
-averaging, so the planner optimises against a reduced model, and a
+That was a steady-state offset with a structural cause, and three things fed it.
+The objective normalised its error by 40 K, a constant inherited from a reward
+the environment had stopped using, so against a 0.1 fuel weight a 3.3 K standing
+error was the optimum of what the controller was being asked to minimise. The
+fuel weight is zero for this release line. And the planner's regenerator
+disagreed with the plant's, so it optimised against a reduced model, and a
 finite-horizon MPC with plant-model mismatch settles with a bias that a PID's
-integrator removes. An offset-free correction -- a clamped integral of the
-measured error shifting the solver's setpoint, dropped at each schedule step
-because it also absorbs operating-point-specific gain error -- takes it from
-19.1% behind to 16.0%, and is kept. Horizon is not the cause: going from 0.45 to
-1.52 open-loop time constants is worth 1.1 points at three times the solve cost.
+integrator removes; an offset-free correction, a clamped integral of the
+measured error shifting the solver's setpoint and dropped at each schedule step,
+took it from 19.1% behind to 16.0% and is kept. Horizon was never the cause:
+going from 0.45 to 1.52 open-loop time constants was worth 1.1 points at three
+times the solve cost.
 
-The remainder needs either a regenerator model matching the plant's node count
-or a proper disturbance observer. Until then it is recorded as
-`EnvSpec.mpc_degraded` with those numbers, so the contract xfails on it rather
-than the benchmark quietly presenting a controller as an upper bound it is not.
+**It now leads, 1513.4 against 1443.5, winning 10 of 10 seeds**, and the
+`EnvSpec.mpc_degraded` flag has been removed. The last piece was variable
+scaling: the planner had been handing IPOPT crown temperatures around 1600 K
+next to a fuel fraction around 0.6, and its mean iteration count over 16 000
+solves is now 16.8.
+
 
 The same change moved the two path-following tasks from being scored over **less
 than one lap** -- 0.76 for the circle, 0.91 for the figure-8 -- to three. Their
@@ -588,3 +733,45 @@ plant: its free lime depends on temperature through a 280 kJ/mol Arrhenius term
 that is then advected down the kiln, so reverse-mode gradients overflow to NaN
 after about eight steps while finite differences on the same objective stay
 clean. Hence cross-entropy sampling rather than a gradient method.
+
+<!-- BEGIN GENERATED BASELINE TABLE -->
+
+<!-- Written by scripts/generate_baseline_table.py from
+     data/baseline_returns.json. Do not edit by hand. -->
+
+| environment | steps | PID | MPC | PID share | MPC share | MPC wins | term |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `plane3d_figure8` | 400 | 81.9 | 384.2 | 0.205 | 0.960 | 10/10 | 0 |
+| `plane3d_heading` | 200 | 32.0 | 170.2 | 0.160 | 0.851 | 10/10 | 0 |
+| `plane3d_circle` | 300 | 130.4 | 276.1 | 0.435 | 0.920 | 10/10 | 0 |
+| `plane3d_racetrack` | 650 | 303.7 | 614.1 | 0.467 | 0.945 | 10/10 | 0 |
+| `plane_sine` | 480 | 294.8 | 458.1 | 0.614 | 0.954 | 10/10 | 0 |
+| `distillation` | 200 | 122.2 | 154.6 | 0.611 | 0.773 | 10/10 | 0 |
+| `boiler_drum` | 400 | 247.7 | 303.0 | 0.619 | 0.758 | 10/10 | 0 |
+| `plane_energy` | 1200 | 741.7 | 907.6 | 0.618 | 0.756 | 10/10 | 0 |
+| `four_tank` | 500 | 388.5 | 446.9 | 0.777 | 0.894 | 10/10 | 0 |
+| `ph_neutralization` | 300 | 226.1 | 260.7 | 0.754 | 0.869 | 9/10 | 0 |
+| `cstr` | 100 | 89.4 | 94.6 | 0.894 | 0.946 | 10/10 | 0 |
+| `glass_furnace` | 1600 | 1443.5 | 1513.4 | 0.902 | 0.946 | 10/10 | 0 |
+| `reactor` | 8640 | 703.9 | 1080.7 | 0.081 | 0.125 | 10/10 | 0 |
+| `cement_kiln` | 700 | 621.5 | 647.7 | 0.888 | 0.925 | 10/10 | 0 |
+| `battery` | 360 | 160.8 | 174.2 | 0.447 | 0.484 | 1/10 ⚠️ | 0 |
+| `plane` | 280 | 249.2 | 259.1 | 0.890 | 0.925 | 9/10 | 0 |
+| `hvac` | 720 | 377.7 | 401.0 | 0.525 | 0.557 | 10/10 | 0 |
+| `wind_turbine` | 400 | 331.8 | 343.9 | 0.829 | 0.860 | 9/10 | 0 |
+| `first_order` | 100 | 93.0 | 95.4 | 0.930 | 0.954 | 10/10 | 0 |
+
+`share` is the mean return over the episode's ceiling, so 1.000 would be
+perfect tracking on every step. It is comparable across rows; the raw
+returns are not, because they are sums over episodes of different lengths.
+
+`MPC wins` counts seeds where the MPC out-scored the PID, paired.
+A ⚠️ marks an environment where it loses more often than it wins, which
+means it is not the upper bound this table presents it as; those carry an
+`EnvSpec.mpc_degraded` note saying why.
+
+`term` counts seeds where the MPC ended the episode early. A permanent
+zero can mean the controller is safe or that the environment cannot
+terminate at all; `first_order` is the latter.
+
+<!-- END GENERATED BASELINE TABLE -->

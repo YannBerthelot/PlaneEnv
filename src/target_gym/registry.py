@@ -682,22 +682,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         test_params={"max_steps_in_episode": 1600},  # 13.3 h at dt=30 s, 12.1 tau
         tuned_gains_key="glass_furnace",
         disturbance_fields=("m_pull_disturbance",),
-        mpc_degraded=(
-            "Pending re-record. This MPC was 16.0% behind its own PID over ten "
-            "seeds (1028.5 against 1223.9), losing on 10 of 10, with a 2-6 K "
-            "steady-state offset from the second half of every episode onward. "
-            "The cause was structural and is now believed fixed, but the fix "
-            "has not been confirmed at ten seeds, so the flag stays until it "
-            "is. Three things were wrong. The objective normalised its error by "
-            "40 K, a constant inherited from a reward the environment had "
-            "stopped using, so against a 0.1 fuel weight a 3.3 K standing error "
-            "was the optimum of what the controller was asked to minimise. The "
-            "fuel weight is now zero for this release line. And the planner's "
-            "regenerator disagreed with the plant's. Measured over full "
-            "episodes on four seeds after all three, the MPC leads the PID on "
-            "every one, at 0.12 s a step against 5.5 on the worst seed before. "
-            "Confirm at ten seeds, then delete this."
-        ),
     ),
     EnvSpec(
         name="reactor",
@@ -794,6 +778,21 @@ _SPECS: tuple[EnvSpec, ...] = (
         # traverse the usable state-of-charge range at full power.
         test_params={"max_steps_in_episode": 360},
         tuned_gains_key="battery",
+        mpc_degraded=(
+            "This MPC loses to its own PID on 9 of 10 seeds, by 3 to 11 points "
+            "each, and its published mean leads only because of seed 0: 350.4 "
+            "against a 154.7 mean over the other nine, on a 360-step ceiling. "
+            "The PID scores a flat ~160 on every seed including that one, so "
+            "the episode is not unusually easy; only the planner sees it. "
+            "Two explanations are ruled out. It is not the fixed PRNGKey(0) "
+            "the planners use for disturbances, which would give the MPC the "
+            "true noise trajectory on seed 0 alone: every other stochastic "
+            "environment has a seed-0 ratio of ~1.0, cement_kiln included, "
+            "and that uses the same sampling planner. It is not the initial "
+            "condition either, since seed 5 starts at a similar state of "
+            "charge with a larger power target and scores 154. Quote the "
+            "per-seed win count for this environment, not the mean."
+        ),
         disturbance_fields=("target_power",),
     ),
 )

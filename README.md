@@ -56,25 +56,41 @@ Prefer a browser? The [Colab quickstart](https://colab.research.google.com/githu
 ```python
 import jax
 import numpy as np
-from target_gym import Plane, PlaneParams
+from target_gym.provenance import load_recorded_baselines
 from target_gym.registry import REGISTRY
+from target_gym.runners.runners import baseline_policy
 
-env, params = Plane(), PlaneParams()
-obs, state = env.reset(jax.random.PRNGKey(0), params)
+spec = REGISTRY["plane"]
+env, params = spec.make_env(), spec.make_test_params()
 
-# Every environment ships a tuned expert, so a learned policy has something
-# real to beat. The docs say how good each one is.
-pid = REGISTRY["plane"].make_pid()
-pid.reset()
 
-for t in range(200):
-    action = np.atleast_1d(pid(obs))
-    obs, state, reward, terminated, truncated, info = env.step(
-        jax.random.PRNGKey(t), state, action, params
-    )
-    if terminated or truncated:
-        break
+def evaluate(policy, seed):
+    # One episode. Any policy taking (obs, state) works -- including yours.
+    key = jax.random.PRNGKey(seed)
+    obs, state = env.reset_env(key, params)
+    total = 0.0
+    for _ in range(int(params.max_steps_in_episode)):
+        action = policy(np.asarray(obs), state)
+        obs, state, reward, terminated, _ = env.step_env(key, state, action, params)
+        total += float(reward)
+        if bool(terminated):
+            break
+    return total
+
+
+print("PID:", evaluate(baseline_policy(spec, "pid", params), seed=0))
+
+# The MPC ceiling is already recorded on these same seeds, so there is nothing
+# to run: it costs minutes per seed and would come out the same. Evaluate your
+# agent on seeds 0-9 and read off where you land between the two.
+print("MPC:", load_recorded_baselines()["plane"]["mpc_returns"][0])
 ```
+
+Both baselines take `(obs, state)` so one loop serves either, and your agent
+drops in beside them. The asymmetry is deliberate: **the PID ignores `state`**,
+reading instruments as a plant controller does, while **the MPC ignores `obs`**,
+reading the true state because it is a full-state *ceiling* rather than a peer.
+A benchmark whose upper bound sees more than its contestants should say so.
 
 Or use your favourite RL library, JAX or not (stable-baselines3 here). Note
 that you only get end-to-end GPU with a JAX-based one:

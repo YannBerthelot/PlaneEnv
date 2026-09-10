@@ -1,0 +1,107 @@
+{
+  "battery-v1": {
+    "fingerprint": "2c738107c42f2628",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "boiler_drum-v1": {
+    "fingerprint": "f594bdede5b4e0d1",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "cement_kiln-v1": {
+    "fingerprint": "c5525d4bd78a542f",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "cstr-v1": {
+    "fingerprint": "27a32e08f330f394",
+    "note": "initial stamp: every environment ships as v1 at the 0.9 release",
+    "stamped": "2026-09-04T11:12:51+00:00"
+  },
+  "distillation-v1": {
+    "fingerprint": "919d739f3643a69d",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "first_order-v1": {
+    "fingerprint": "083c809ce6239f48",
+    "note": "initial stamp: every environment ships as v1 at the 0.9 release",
+    "stamped": "2026-09-04T11:12:51+00:00"
+  },
+  "four_tank-v1": {
+    "fingerprint": "da38eef254db0f34",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "glass_furnace-v1": {
+    "fingerprint": "bb68b9b68a3a56b8",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "hvac-v1": {
+    "fingerprint": "ff5f238f0b9651e7",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "patrol-v1": {
+    "fingerprint": "df53318255befae7",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "patrol_bearing_only-v1": {
+    "fingerprint": "df53318255befae7",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "ph_neutralization-v1": {
+    "fingerprint": "31518903ea8a4fe8",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "plane-v1": {
+    "fingerprint": "e5d0397cd54ac886",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "plane3d_circle-v1": {
+    "fingerprint": "ffcbd44cb289829d",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "plane3d_figure8-v1": {
+    "fingerprint": "925522f0cf3233f4",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "plane3d_heading-v1": {
+    "fingerprint": "2961df4b494a5ab7",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "plane3d_racetrack-v1": {
+    "fingerprint": "f1f9b8f7b7dcec42",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T07:38:30+00:00"
+  },
+  "plane_energy-v1": {
+    "fingerprint": "3994cf3273f563eb",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "plane_sine-v1": {
+    "fingerprint": "01afd0d200bbcfb0",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "reactor-v1": {
+    "fingerprint": "da9cd77061a7830c",
+    "note": "re-stamped without a note",
+    "stamped": "2026-09-10T09:54:54+00:00"
+  },
+  "wind_turbine-v1": {
+    "fingerprint": "02ccd5e9b300c1f5",
+    "note": "initial stamp: every environment ships as v1 at the 0.9 release",
+    "stamped": "2026-09-04T11:12:51+00:00"
+  }
+}

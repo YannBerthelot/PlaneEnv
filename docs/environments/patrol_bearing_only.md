@@ -1,6 +1,6 @@
 # Patrol - MARL, bearing-only
 
-<p align="center"><img src="../videos/patrol_bearing_only/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/patrol_bearing_only/pid_output.gif" width="480px"/></p>
 
 Close-patrol (formation-keeping) environment: state, parameters and transition.
 

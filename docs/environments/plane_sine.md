@@ -1,6 +1,6 @@
 # Altitude - sinusoid
 
-<p align="center"><img src="../videos/plane_sine/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/plane_sine/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|

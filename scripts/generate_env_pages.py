@@ -233,7 +233,17 @@ def page(name: str, spec) -> str:
     out = [f"# {title}", ""]
     if video:
         out += [
-            f'<p align="center"><img src="../{video}" width="480px"/></p>',
+            # ``../../``, not ``../``.
+            #
+            # mkdocs serves these with directory URLs, so this page is
+            # ``/environments/<name>/`` and a relative source resolves against
+            # that directory, not against ``/environments/``. With one level the
+            # browser asked for ``/environments/videos/<name>/pid_output.gif``
+            # and got a 404 on every environment page, while the homepage
+            # worked because it sits at the site root. mkdocs rewrites relative
+            # links in Markdown but not inside raw HTML, which is why this has
+            # to be right here.
+            f'<p align="center"><img src="../../{video}" width="480px"/></p>',
             "",
         ]
     if module and module.__doc__:

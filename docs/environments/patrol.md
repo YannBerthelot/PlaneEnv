@@ -1,6 +1,6 @@
 # Patrol - MARL formation
 
-<p align="center"><img src="../videos/patrol/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/patrol/pid_output.gif" width="480px"/></p>
 
 Close-patrol (formation-keeping) environment: state, parameters and transition.
 

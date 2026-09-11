@@ -1,6 +1,6 @@
 # CSTR
 
-<p align="center"><img src="../videos/cstr/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/cstr/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|

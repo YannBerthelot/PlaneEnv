@@ -1,6 +1,6 @@
 # pH neutralisation
 
-<p align="center"><img src="../videos/ph_neutralization/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/ph_neutralization/pid_output.gif" width="480px"/></p>
 
 pH neutralisation — CSTR with acid, buffer and base streams.
 

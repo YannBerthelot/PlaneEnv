@@ -1,6 +1,6 @@
 # First order
 
-<p align="center"><img src="../videos/first_order/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/first_order/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|

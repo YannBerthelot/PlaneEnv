@@ -1,6 +1,6 @@
 # Glass Furnace
 
-<p align="center"><img src="../videos/glass_furnace/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/glass_furnace/pid_output.gif" width="480px"/></p>
 
 Glass furnace (float-glass process) — regenerative end-port fired furnace.
 

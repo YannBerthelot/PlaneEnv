@@ -1,6 +1,6 @@
 # Boiler Drum
 
-<p align="center"><img src="../videos/boiler_drum/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/boiler_drum/pid_output.gif" width="480px"/></p>
 
 Boiler drum — natural-circulation drum boiler with shrink-and-swell.
 

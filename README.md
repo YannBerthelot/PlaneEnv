@@ -56,19 +56,18 @@ Also available as a [Colab notebook](https://colab.research.google.com/github/Ya
 ```python
 import jax
 import numpy as np
-from target_gym import Plane, PlaneParams
+from target_gym import Plane
 
 env = Plane()
-params = PlaneParams()          # or env.default_params
 pid = env.make_pid()            # the shipped baseline, tuned
 
 key = jax.random.PRNGKey(0)
-obs, state = env.reset(key, params)
+obs, state = env.reset(key)
 
 total = 0.0
-for _ in range(params.max_steps_in_episode):
+for _ in range(env.default_params.max_steps_in_episode):
     action = pid(np.asarray(obs))
-    obs, state, reward, terminated, truncated, _ = env.step(key, state, action, params)
+    obs, state, reward, terminated, truncated, _ = env.step(key, state, action)
     total += float(reward)
     if terminated or truncated:
         break
@@ -76,9 +75,10 @@ for _ in range(params.max_steps_in_episode):
 print("PID return:", total)
 ```
 
-`env.reset(key)` and `env.step(key, state, action)` follow the
-[gymnax](https://github.com/RobertTLange/gymnax) API and fall back to
-`env.default_params`. Every environment also exposes `make_pid()`,
+`reset` and `step` follow the
+[gymnax](https://github.com/RobertTLange/gymnax) API and take an optional
+`params`; each environment exports its parameter class (`PlaneParams`, and so
+on) for custom configurations. Every environment also exposes `make_pid()`,
 `make_mpc()` and `save_video()`.
 
 <details>

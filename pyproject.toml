@@ -27,7 +27,12 @@ classifiers = [
 # The upper bound is a tested ceiling, not caution: it is the newest Python the
 # dependency set resolves and passes against. CI runs every version in this
 # window, so widening it means adding a column to that grid.
-requires-python = ">=3.11,<3.15"
+# Upper bound tracks jaxlib, which publishes cp311 through cp313 and no
+# cp314 wheel. Declaring <3.15 let uv resolve a 3.14 interpreter and then
+# fail with "Distribution jaxlib==0.6.2 ... doesn't have a source
+# distribution or wheel for the current platform", which is a confusing
+# way to say the Python is too new. Raise this when jaxlib ships cp314.
+requires-python = ">=3.11,<3.14"
 
 dependencies = [
     # gymnax >= 1.0 is required, not merely preferred: the envs implement

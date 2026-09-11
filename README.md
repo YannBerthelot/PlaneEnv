@@ -1,8 +1,8 @@
 <h1 align="center">TargetGym</h1>
 
 <p align="center">
-  <b>Reach and maintain.</b><br/>
-  21 environments and controllers for <i>target MDPs</i>: Setpoint tracking benchmark.
+  <b>Reach the target. Then hold it.</b><br/>
+  21 JAX environments for setpoint tracking, each with a tuned PID and an MPC ceiling.
 </p>
 
 <p align="center">
@@ -19,24 +19,24 @@
   <sub>One from each family, held on setpoint by its shipped PID baseline.</sub>
 </p>
 
-**21 environments**: 9 aircraft, 5 process control, 5 industrial / energy,
-2 renewable energy. Every one ships a tuned PID, and twenty an MPC as well,
-both recorded over ten episode seeds. Learned baselines are not published yet;
-what they will be measured against, and how, is in
-[docs/rl-protocol.md](docs/rl-protocol.md).
+Most RL benchmarks ask you to reach a goal once and stop. Industrial control
+does not work that way: you reach a setpoint and then **hold it**, indefinitely,
+against disturbances. That is a [target MDP](docs/target-mdp.md), and it fails
+in its own ways -- irrecoverable states, transport delay, finite budgets, a
+target that keeps moving.
 
-**TargetGym** is a collection of JAX **reinforcement learning environments**
-built around [**target MDPs**](docs/target-mdp.md): tasks where you **reach a
-target and then hold it**, instead of reaching a goal once and stopping. Most
-industrial control works that way. You keep a setpoint against disturbances,
-indefinitely.
+**TargetGym** is 21 such environments, drawn from real plants: an A320-like
+aircraft, a glass furnace, a nuclear reactor, a cement kiln, a grid battery, a
+wind turbine, a formation of aircraft flying a patrol.
 
-They are fast (0.6 to 700 M steps/s on CPU, see
-[docs/performance.md](docs/performance.md)) and end-to-end GPU compatible, with
-`jit`/`vmap`/`scan` throughout. Their physics is a **documented, tested
-contract**: every environment carries a `PHYSICS.md` with a sourced parameter
-table, published validation targets asserted by tests, and quantified known
-deviations.
+|  |  |
+| --- | --- |
+| **You know at once whether your agent is any good.** | Every environment ships a tuned PID, and 20 of 21 an MPC that reads the true state as a full-information *ceiling*. Both are recorded over ten seeds, so a new score lands somewhere you can interpret. |
+| **The physics is a tested contract, not a claim.** | Each environment carries a `PHYSICS.md` with a sourced parameter table, published validation targets asserted by tests, and its known deviations written down. |
+| **Fast enough to not be the bottleneck.** | 0.6 M to 700 M steps/s on CPU, `jit`/`vmap`/`scan` throughout, end-to-end GPU. |
+
+Learned baselines are not published yet; what they will be measured against,
+and how, is in [docs/rl-protocol.md](docs/rl-protocol.md).
 
 ---
 
@@ -132,7 +132,7 @@ Four families, all behind one interface.
 
 | Family | Count | What they are |
 |---|---|---|
-| **Aircraft** | 10 | An A320-like 2D aircraft holding altitude, on four target patterns; four 3D path-following tasks; and two multi-agent patrol variants |
+| **Aircraft** | 9 | An A320-like 2D aircraft on three reference patterns (hold, sine, altitude-and-airspeed); four 3D path-following tasks; and two formation-patrol variants |
 | **Process control** | 5 | CSTR, first-order lag, four-tank, pH neutralisation, binary distillation |
 | **Industrial / energy** | 5 | Glass furnace, nuclear reactor, building HVAC, boiler drum, cement kiln |
 | **Renewable energy** | 2 | NREL 5 MW wind turbine, grid battery |
@@ -170,35 +170,30 @@ the multi-agent patrol at tier 6.
 
 ## Baselines
 
-All 21 environments ship a tuned PID, and 20 of them an MPC as well, so you
-have something real to beat from the first run.
+All 21 environments ship a tuned PID, and 20 of them an MPC, so you have
+something real to beat from the first run. Structure matters more than gains
+here, and the baselines are chosen to show it: three-element control on the
+boiler drum so the level gauge cannot lie to the controller, a cascade on the
+kiln because integral action on a half-hour-old measurement oscillates at the
+delay period, and **crossed** loops on the four-tank, whose negative RGA
+element makes the obvious pairing unstable.
 
-**A PID losing here is a claim about these tasks, not about PID control.** The
-suite collects problems where anticipation pays. Where the reference and the
-disturbances are things you can react to rather than foresee, a PID is optimal
-or close enough that the gap is unmeasurable, and twice this project has had to
-learn that from its own measurements: the battery's dispatch signal was so noisy
-that *no* controller could score above 0.43 of the ceiling, and the patrol
-follower chased a lead at one constant turn rate, which a single feedforward
-term cancels outright. Both times the environment was at fault and was fixed.
-A PID is also cheap, transparent, certifiable and runs on a microcontroller,
-and none of that shows up in a return.
+Every baseline must beat the best constant action on its environment -- a low
+bar on purpose, because it is the one a mis-wired controller trips over -- and
+where a baseline is weak, its page says how weak.
 
-The right *structure* usually matters more than the gains, and the baselines are
-chosen to show it: three-element control on the boiler drum, where feedwater
-tracks measured steam flow so the level gauge cannot lie to it; a cascade on the
-kiln, because integral action on a half-hour-old measurement oscillates at the
-delay period; and **crossed** loops on the four-tank, whose negative RGA element
-makes the obvious diagonal pairing unstable.
-
-Every baseline has to beat the best constant action on its environment, which
-is a low bar on purpose, because it is the one a mis-wired controller trips
-over. And where a baseline is weak, its page says how weak, so you know what
-you are actually measuring against.
+> **A PID losing here is a claim about these tasks, not about PID control.**
+> This suite collects problems where anticipation pays. Where the reference and
+> the disturbances can be reacted to rather than foreseen, a PID is optimal or
+> close enough that the gap is unmeasurable, and this project has twice had to
+> learn that from its own measurements: a battery whose dispatch signal was so
+> noisy that *no* controller could score above 0.43 of the ceiling, and a patrol
+> follower chasing a lead at one constant turn rate, which a single feedforward
+> term cancels outright. Both times the environment was at fault and was fixed.
 
 **[docs/baselines.md](docs/baselines.md)** has the details: the three MPC
-implementations and why each plant gets the one it does, the cascaded autopilot,
-tuning and caching, and per-environment baseline coverage.
+implementations and why each plant gets the one it does, tuning and caching,
+solver convergence reporting, and per-environment coverage.
 
 ---
 
@@ -239,29 +234,15 @@ values, L/D ratios, thermal time constants, energy balances, equilibria. A test
 that recomputes the code's own expression would pass just as happily on a wrong
 one.
 
-A per-environment summary of what each model is validated against, and an
-example of something that validation caught, is in
-[`docs/PHYSICS_METHODOLOGY.md`](docs/PHYSICS_METHODOLOGY.md#what-each-model-is-checked-against-and-something-it-caught).
-
 **All 21 environments are covered** by fifteen contracts, since the aircraft
 variants share the plant they are built on. On top of that, every environment
 runs the same conformance suite (determinism, PRNG handling,
 `jit`/`vmap`/`scan`, numerical health over a full episode), so the one you pick
 behaves like the rest.
 
-Method and reasoning: [`docs/PHYSICS_METHODOLOGY.md`](docs/PHYSICS_METHODOLOGY.md).
-
----
-
-## Performance
-
-Fast enough that the environment is not the bottleneck: **0.5 M to 1.7 G
-steps/s on CPU**, vmapped and scanned inside one `jit`, and higher on GPU. The
-spread across the suite is three orders of magnitude, so you can spend a sample
-budget where the dynamics are hard and iterate quickly everywhere else.
-
-Per-environment figures, the method, and how to reproduce them:
-[`docs/performance.md`](docs/performance.md).
+**[Physics methodology](docs/PHYSICS_METHODOLOGY.md)** has the method, and a
+per-environment summary of what each model is validated against together with
+an example of something that validation caught.
 
 ---
 
@@ -271,13 +252,16 @@ Per-environment figures, the method, and how to reproduce them:
 |---|---|
 | **[Getting started](docs/getting-started.md)** | Run an episode, vectorise it, plug into Gymnasium |
 | **[Target MDPs](docs/target-mdp.md)** | The formal setting the suite is built around |
-| **[Environment reference](docs/environments.md)** | All 22: shapes, tracked variables, baselines, contracts |
+| **[Environment reference](docs/environments.md)** | All 21: shapes, tracked variables, baselines, contracts |
 | **[Public API](docs/api.md)** | What is stable and what is provisional |
 | **[Baselines](docs/baselines.md)** | The shipped PID and MPC controllers, and tuning them |
 | **[RL protocol](docs/rl-protocol.md)** | How to measure a learned policy so the number means something |
 | **[Reward shaping](docs/reward-shaping.md)** | Why the tracking rewards have the shape they do |
 | **[Model review checklist](docs/model-review-checklist.md)** | Thirteen checks worth running on any plant model |
 | **[Physics methodology](docs/PHYSICS_METHODOLOGY.md)** | How the physics is sourced, validated and bounded |
+| **[Rendering](docs/rendering.md)** | The dashboards, the two toolkits, regenerating the media |
+| **[Complexity ladder](docs/complexity.md)** | Six tiers, for using the suite as a curriculum |
+| **[Throughput](docs/performance.md)** | Steps per second per environment, and how it is measured |
 | **[Testing](docs/testing.md)** | How the suite is organised, if you are contributing |
 
 The full index is at **[docs/](docs/index.md)**.

@@ -139,29 +139,33 @@ step response (time to 63.2% of the total change, the quantity relay tuning
 assumes). Where it does not, that is a property of the environment worth knowing
 before reading any result from it.
 
-| environment | N | tau (steps) | 5·tau | gamma |
+<!-- BEGIN GENERATED TIME CONSTANTS -->
+
+| environment | N | tau (steps) | 10*tau required | gamma |
 | --- | --- | --- | --- | --- |
-| cstr | 100 | 5 | 25 | 0.99000 |
-| first_order | 100 | 10 | 50 | 0.99000 |
-| hvac | 720 | 62 | 310 | 0.99861 |
-| plane | 280 | 23 | 115 | 0.99643 |
-| plane_energy | 1200 | 23 | 115 | 0.99917 |
-| plane_sine | 480 | 23 | 115 | 0.99792 |
-| plane3d_heading | 200 | 14 | 70 | 0.99500 |
-| plane3d_circle | 300 | 14 | 70 | 0.99667 |
-| plane3d_figure8 | 400 | 38 | 190 | 0.99750 |
-| plane3d_racetrack | 650 | 14 | 70 | 0.99846 |
-| patrol | 200 | 13 | 65 | 0.99500 |
-| patrol_bearing_only | 200 | 12 | 60 | 0.99500 |
-| distillation | 200 | 8 | 40 | 0.99500 |
-| glass_furnace | 1600 | 132 | 660 | 0.99938 |
-| cement_kiln | 700 | 58 | 290 | 0.99857 |
-| battery | 360 | 1 | 5 | 0.99722 |
-| boiler_drum | 400 | 3 | 15 | 0.99750 |
-| wind_turbine | 400 | 1 | 5 | 0.99750 |
-| four_tank | 500 | 38 | 190 | 0.99800 |
-| ph_neutralization | 300 | 14 | 70 | 0.99667 |
-| reactor | 1200 | 1 | 5 | 0.99917 |
+| `battery` | 360 | 1 | 10 | 0.99722 |
+| `boiler_drum` | 400 | 3 | 30 | 0.99750 |
+| `cement_kiln` | 700 | 58 | 580 | 0.99857 |
+| `cstr` | 100 | 5 | 50 | 0.99000 |
+| `distillation` | 200 | integrating | n/a | 0.99500 |
+| `first_order` | 100 | 10 | 100 | 0.99000 |
+| `four_tank` | 500 | integrating | n/a | 0.99800 |
+| `glass_furnace` | 1600 | 822 | 8220 **1.9 tau** | 0.99938 |
+| `hvac` | 720 | 62 | 620 | 0.99861 |
+| `patrol` | 200 | integrating | n/a | 0.99500 |
+| `patrol_bearing_only` | 200 | integrating | n/a | 0.99500 |
+| `ph_neutralization` | 300 | 14 | 140 | 0.99667 |
+| `plane` | 280 | integrating | n/a | 0.99643 |
+| `plane3d_circle` | 300 | integrating | n/a | 0.99667 |
+| `plane3d_figure8` | 400 | integrating | n/a | 0.99750 |
+| `plane3d_heading` | 200 | integrating | n/a | 0.99500 |
+| `plane3d_racetrack` | 650 | integrating | n/a | 0.99846 |
+| `plane_energy` | 1200 | 365 | 3650 **3.3 tau** | 0.99917 |
+| `plane_sine` | 480 | 217 | 2170 **2.2 tau** | 0.99792 |
+| `reactor` | 8640 | 320 | 3200 | 0.99988 |
+| `wind_turbine` | 400 | 1 | 10 | 0.99750 |
+
+<!-- END GENERATED TIME CONSTANTS -->
 
 ### How long an episode has to be
 

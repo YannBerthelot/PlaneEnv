@@ -69,7 +69,7 @@ STEAM_OU_THETA = 5.0e-3
 @struct.dataclass
 class BoilerDrumParams(EnvParams):
     delta_t: float = 2.0
-    max_steps_in_episode: int = 1_800  # 1 hour
+    max_steps_in_episode: int = 400  # 800 s at dt = 2 s
 
     # -- geometry (Astrom & Bell P16-G16, Oresundsverket 160 MW unit) --------
     V_t: float = 88.0  # m3   total water + steam volume

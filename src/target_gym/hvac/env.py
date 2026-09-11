@@ -129,7 +129,7 @@ class HVACParams(EnvParams):
 
     # ---- Time discretization ----
     delta_t: float = 900.0  # s (15 min) -- standard building-simulation step
-    max_steps_in_episode: int = 672  # 7 days
+    max_steps_in_episode: int = 720  # 7.5 days at dt = 900 s
 
 
 @struct.dataclass

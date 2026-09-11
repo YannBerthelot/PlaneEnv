@@ -130,7 +130,7 @@ class WindTurbineParams(EnvParams):
     # Rotor time constant J w^2 / P ~ 14 s, so dt = 0.25 s gives ~56 steps per
     # time constant. 1200 steps = 5 min.
     delta_t: float = 0.25
-    max_steps_in_episode: int = 1200
+    max_steps_in_episode: int = 400
 
 
 @struct.dataclass

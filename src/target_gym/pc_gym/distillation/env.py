@@ -117,7 +117,7 @@ class DistillationParams(EnvParams):
     # integrator needs 16 substeps at this step size for stability; see
     # ``compute_next_state``.
     delta_t: float = 1.0
-    max_steps_in_episode: int = 600
+    max_steps_in_episode: int = 200
 
 
 @struct.dataclass

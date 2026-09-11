@@ -107,9 +107,12 @@ while True:
 
 ### Comparing against the baselines
 
-Published PID and MPC returns are recorded at each environment's benchmark
-settings, which differ from the defaults (`plane` runs 10 000 steps by default
-and is scored over 280). `EnvSpec` carries those settings:
+For most environments the defaults *are* the scored configuration, so a plain
+rollout is comparable to the published numbers. The exceptions are the plants
+that host several task variants: `PlaneParams` is shared by `plane`,
+`plane_sine` and `plane_energy`, which are scored over 280, 480 and 1200 steps,
+so one class cannot default to all three. `EnvSpec.test_params` carries the
+per-variant settings, and `spec.make_test_params()` resolves them:
 
 ```python
 import numpy as np

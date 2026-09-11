@@ -156,7 +156,7 @@ class BatteryParams(EnvParams):
     # 10-90 % state of charge at full power takes ~96 min, so a 60 min episode
     # at 5 s per step exercises a real fraction of the energy budget.
     delta_t: float = 5.0
-    max_steps_in_episode: int = 720
+    max_steps_in_episode: int = 360
 
 
 @struct.dataclass

@@ -625,7 +625,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.pc_gym.cstr.env", "CSTRParams"),
         make_pid=_pid("make_cstr_stateful_pid"),
         make_mpc=_mpc("make_cstr_mpc"),
-        test_params={"max_steps_in_episode": 100},
         tuned_gains_key="cstr",
     ),
     EnvSpec(
@@ -635,7 +634,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         params_cls=_LazyParams("target_gym.pc_gym.first_order.env", "FirstOrderParams"),
         make_pid=_pid("make_first_order_stateful_pid"),
         make_mpc=_mpc("make_first_order_mpc"),
-        test_params={"max_steps_in_episode": 100},
         tuned_gains_key="first_order",
     ),
     EnvSpec(
@@ -649,7 +647,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         # levels, so the previous 100-step horizon was under two of them --
         # every controller was still mid-transient and they all scored alike,
         # which is why the effectiveness contract could not separate them here.
-        test_params={"max_steps_in_episode": 500},
         tuned_gains_key="four_tank",
     ),
     EnvSpec(
@@ -661,7 +658,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_mpc=_mpc("make_ph_mpc"),
         # 300 steps = 25 min ~ 17 residence times, enough for the buffer
         # disturbance to move the operating point.
-        test_params={"max_steps_in_episode": 300},
         tuned_gains_key="ph_neutralization",
         disturbance_fields=("q2",),
     ),
@@ -677,7 +673,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         # 200 min ~ one dominant time constant. The column is the slowest
         # environment per step (41 states, 16 substeps for stability), so the
         # test episode is kept short.
-        test_params={"max_steps_in_episode": 200},
         tuned_gains_key="distillation",
         disturbance_fields=("zF",),
     ),
@@ -688,8 +683,7 @@ _SPECS: tuple[EnvSpec, ...] = (
         env_factory=_glass_furnace,
         params_cls=_LazyParams("target_gym.glass_furnace.env", "GlassFurnaceParams"),
         make_pid=_pid("make_glass_furnace_stateful_pid"),
-        make_mpc=_mpc("make_glass_furnace_mpc"),
-        test_params={"max_steps_in_episode": 1600},  # 13.3 h at dt=30 s, 12.1 tau
+        make_mpc=_mpc("make_glass_furnace_mpc"),  # 13.3 h at dt=30 s, 12.1 tau
         tuned_gains_key="glass_furnace",
         disturbance_fields=("m_pull_disturbance",),
     ),
@@ -730,7 +724,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         # and as many solar cycles -- which is what distinguishes controllers
         # here. (This comment read "2 days" long after the episode-length audit
         # raised it from the 192 steps that actually was two days.)
-        test_params={"max_steps_in_episode": 720},
         tuned_gains_key="hvac",
         disturbance_fields=("weather_dev",),
     ),
@@ -746,7 +739,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         # many times over. (This comment read "240 steps = 2 hours ... about
         # five transport delays" long after the episode-length audit raised it
         # to 700.)
-        test_params={"max_steps_in_episode": 700},
         tuned_gains_key="cement_kiln",
         disturbance_fields=("raw_meal",),
     ),
@@ -759,7 +751,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_mpc=_mpc("make_boiler_drum_mpc"),
         # 400 steps = 800 s at dt = 2 s, about 20 times the ~35 s swell peak,
         # so a controller has to survive many inverse-response transients.
-        test_params={"max_steps_in_episode": 400},
         tuned_gains_key="boiler_drum",
         disturbance_fields=("q_steam",),
     ),
@@ -773,7 +764,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_pid=_pid("make_wind_turbine_stateful_pid"),
         make_mpc=_mpc("make_wind_turbine_mpc"),
         # 400 steps = 100 s ~ 7 rotor time constants.
-        test_params={"max_steps_in_episode": 400},
         tuned_gains_key="wind_turbine",
         noise_fields=("turbulence_std",),
         disturbance_fields=("v_wind",),
@@ -787,7 +777,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         make_mpc=_mpc("make_battery_mpc"),
         # 360 steps = 30 min, a real fraction of the ~96 min it takes to
         # traverse the usable state-of-charge range at full power.
-        test_params={"max_steps_in_episode": 360},
         tuned_gains_key="battery",
         noise_fields=("dispatch_noise_std",),
         disturbance_fields=("target_power",),

@@ -70,7 +70,7 @@ FEED_OU_THETA = 8.3e-4
 @struct.dataclass
 class CementKilnParams(EnvParams):
     delta_t: float = 30.0
-    max_steps_in_episode: int = 480  # 4 hours
+    max_steps_in_episode: int = 700  # 5.8 h at dt = 30 s
 
     # -- geometry -------------------------------------------------------------
     diameter: float = 4.0  # m

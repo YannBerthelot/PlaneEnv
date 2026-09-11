@@ -25,7 +25,7 @@ class FirstOrderParams(EnvParams):
     target_x_range: Tuple[float, float] = (0.5, 1.5)
     initial_x_range: Tuple[float, float] = (-0.5, 0.5)
     delta_t: float = 0.05
-    max_steps_in_episode: int = 200
+    max_steps_in_episode: int = 100
 
 
 @struct.dataclass

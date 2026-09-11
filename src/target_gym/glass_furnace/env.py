@@ -269,7 +269,7 @@ class GlassFurnaceParams(EnvParams):
 
     # ---- Time discretization ----
     delta_t: float = 30.0  # s per step
-    max_steps_in_episode: int = 5760  # 48 h
+    max_steps_in_episode: int = 1600  # 13.3 h at dt = 30 s
 
 
 @struct.dataclass

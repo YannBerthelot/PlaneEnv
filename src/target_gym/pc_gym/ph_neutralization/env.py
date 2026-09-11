@@ -131,7 +131,7 @@ class PHParams(EnvParams):
     # Residence time V/q_total ~ 88 s, so dt = 5 s gives ~18 steps per
     # residence time. 600 steps = 50 min ~ 34 residence times.
     delta_t: float = 5.0
-    max_steps_in_episode: int = 600
+    max_steps_in_episode: int = 300
 
 
 @struct.dataclass

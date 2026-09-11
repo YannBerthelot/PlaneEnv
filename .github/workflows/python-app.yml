@@ -99,7 +99,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.14 is absent because jaxlib has no cp314 wheel; see the
+        # 3.14 is absent because gymnax does not support it; see the
         # requires-python note in pyproject.toml.
         python-version: ["3.11", "3.12", "3.13"]
     env:

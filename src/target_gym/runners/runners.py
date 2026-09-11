@@ -288,7 +288,8 @@ def mpc_policy(spec, env, params) -> Callable | None:
     # The planner itself, so a caller can read its solver health afterwards.
     # Without this the controller is captured in a closure and unreachable, and
     # a CasADi baseline could be recorded from solves that never converged.
-    policy.controller = mpc
+    # mypy does not model attributes on function objects, hence the ignore.
+    policy.controller = mpc  # type: ignore[attr-defined]
     return policy
 
 

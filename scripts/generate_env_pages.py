@@ -60,11 +60,22 @@ SPECIAL_VIDEOS: dict[str, str] = {}
 
 
 def _video(name: str) -> str | None:
+    """The clip path for *name*, without checking whether the file is there.
+
+    It deliberately does not test for existence. The clips are a build artifact:
+    ``.gitignore`` excludes ``videos/**/*.gif`` and the docs-deploy workflow
+    renders them before mkdocs runs, so they are present on the published site
+    and absent from a clean checkout. Branching on presence made these pages
+    depend on whether the generator happened to run on a machine that had them,
+    which is exactly what CI caught: pages committed from a working tree with
+    clips disagreed with pages generated in CI without them, and all twenty-one
+    came back stale.
+    """
     for candidate in (
         SPECIAL_VIDEOS.get(name),
         *(c.format(name=name) for c in VIDEO_CANDIDATES),
     ):
-        if candidate and (ROOT / candidate).exists():
+        if candidate:
             return candidate
     return None
 

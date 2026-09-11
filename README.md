@@ -1,9 +1,11 @@
 <h1 align="center">TargetGym</h1>
 
-<p align="center">
-  <b>Reach the target. Then hold it.</b><br/>
-  21 JAX environments for setpoint tracking, with tuned PID and MPC baselines.
-</p>
+<h3 align="center">
+  21 JAX environments for setpoint tracking,<br/>
+  with tuned PID and MPC baselines.
+</h3>
+
+<p align="center"><i>Reach the target. Then hold it.</i></p>
 
 <p align="center">
   <a href="https://pypi.org/project/target-gym/"><img alt="PyPI" src="https://img.shields.io/pypi/v/target-gym?color=blue"></a>
@@ -154,14 +156,14 @@ controller cannot measure. See the **[rendering guide](docs/rendering.md)**.
 Holding a setpoint indefinitely exposes failure modes that episodic goal-reaching
 does not:
 
-| | |
-|---|---|
-| **Irrecoverable states** | A drum that carries water into the turbine, a reactor past runaway, a kiln that has gone cold |
-| **Deep partial observability** | The furnace hides 6 of 9 states, the reactor 7 of 11, the kiln 64 behind 8 measurements |
-| **Inverse response** | Opening the steam valve makes drum level *rise* as water leaves; the four-tank's obvious loop pairing is unstable |
-| **Transport delay** | Half the kiln's response to a fuel change takes a full 25-minute residence time |
-| **Multi-timescale dynamics** | Millisecond neutronics against hour-long xenon; sub-second flame gas against 30-hour glass residence |
-| **Finite budgets** | A battery spends charge to follow dispatch and then cannot follow it |
+| Property | In the suite | Why it is hard to learn |
+|---|---|---|
+| **Irrecoverable states** | A drum that carries water into the turbine, a reactor past runaway, a kiln gone cold | Exploration that reaches them ends the episode permanently |
+| **Deep partial observability** | The furnace hides 6 of 9 states, the reactor 7 of 11, the kiln 64 behind 8 measurements | The policy has to infer what it cannot measure |
+| **Wrong-way-first response** | Opening the steam valve makes drum level *rise* before it falls, as steam bubbles expand | A controller following the immediate trend pushes the loop the wrong way |
+| **Transport delay** | Half the kiln's response to a fuel change arrives a 25-minute residence time later | Credit assignment spans hundreds of steps |
+| **Multi-timescale dynamics** | Millisecond neutronics against hour-long xenon; sub-second flame gas against 30-hour glass residence | One control interval cannot serve both ends |
+| **Finite budgets** | A battery spends charge to follow dispatch and then cannot follow it | Tracking now is priced against tracking later |
 
 Also modelled: actuator lag, competing objectives, and scheduled setpoints that
 reward anticipation (the building's night setback, the furnace's crown schedule,

@@ -110,7 +110,7 @@ silently.
 
 Environments ship a PID and, where tractable, an MPC, so a learned policy has
 something real to beat. PID gains are tuned by `scripts/tune_pid.py` and cached
-in `data/pid_gains.json`. When the gradient-based MPC is unusable, as on the
+in `src/target_gym/data/pid_gains.json`. When the gradient-based MPC is unusable, as on the
 cement kiln whose adjoint overflows through its transport delay, use the sampling
 (CEM) MPC instead.
 
@@ -133,7 +133,7 @@ stale; re-record them and commit the result with the change that invalidated it.
 `src/target_gym/provenance.py` explains why the fingerprint is taken over source
 rather than over behaviour, and what that trade buys.
 
-Two things to know before starting a run. It reads `data/baseline_returns.json`
+Two things to know before starting a run. It reads `src/target_gym/data/baseline_returns.json`
 and merges its results into whatever the file holds *at the time it writes*, so
 a second run started later will not clobber it, but two runs recording the same
 environment will still race, and the last one wins. And gains changes invalidate

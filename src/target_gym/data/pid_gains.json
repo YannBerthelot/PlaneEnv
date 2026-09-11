@@ -1,0 +1,460 @@
+{
+  "plane3d_heading": {
+    "alt": {
+      "Kp": 0.00037733,
+      "Ki": 9.45e-06,
+      "Kd": 0.00478834
+    },
+    "hdg": {
+      "Kp": 4.65883,
+      "Ki": 0.228374,
+      "Kd": 1.886826
+    },
+    "bank": {
+      "Kp": -3.235864
+    },
+    "power_pid": {
+      "Kp": 0.00029661,
+      "Ki": 4.33e-06,
+      "Kd": 0.00646023
+    },
+    "power": 0.6,
+    "note": "coordinate descent on episode return, 3 seeds"
+  },
+  "_meta": {
+    "description": "PID gains tuned via relay autotuning (Astrom-Hagglund). Re-generate with: python scripts/tune_pid.py",
+    "tuned_at": "2026-09-07T18:15:38",
+    "methodology": "Relay feedback experiment: inject relay signal, measure sustained oscillation to extract ultimate gain (Ku) and period (Tu), then compute PID gains via tuning rules. Gain-scheduled across N operating points spanning the target range.",
+    "tuning_rule": "amigo"
+  },
+  "plane": {
+    "pid1": {
+      "Kp": 0.00031063,
+      "Ki": 5.05e-06,
+      "Kd": 0.00606665
+    },
+    "pid2": {
+      "Kp": 0.00033208,
+      "Ki": 1.037e-05,
+      "Kd": 0.00337727
+    },
+    "gain_schedule_pid1": {
+      "operating_points": [
+        3000.0,
+        3714.285714285714,
+        4428.571428571428,
+        5142.857142857143,
+        5857.142857142857,
+        6571.428571428572,
+        7285.714285714286,
+        8000.0
+      ],
+      "Kp": [
+        0.00024487,
+        0.00026697,
+        0.00029228,
+        0.00027238,
+        0.00031063,
+        0.00037483,
+        0.00046836,
+        0.00058103
+      ],
+      "Ki": [
+        4.65e-06,
+        5.01e-06,
+        5.37e-06,
+        4.47e-06,
+        5.05e-06,
+        6.01e-06,
+        7.45e-06,
+        9.03e-06
+      ],
+      "Kd": [
+        0.00409916,
+        0.00451706,
+        0.00505052,
+        0.00527054,
+        0.00606665,
+        0.00742166,
+        0.00935784,
+        0.0118704
+      ]
+    },
+    "gain_schedule_pid2": {
+      "operating_points": [
+        3000.0,
+        3714.285714285714,
+        4428.571428571428,
+        5142.857142857143,
+        5857.142857142857,
+        6571.428571428572,
+        7285.714285714286,
+        8000.0
+      ],
+      "Kp": [
+        0.0001474,
+        0.00024479,
+        0.00024866,
+        0.00040556,
+        0.00033208,
+        0.00038661,
+        0.00043346,
+        0.00041532
+      ],
+      "Ki": [
+        3.56e-06,
+        7.38e-06,
+        6.91e-06,
+        1.313e-05,
+        1.037e-05,
+        1.218e-05,
+        1.319e-05,
+        1.264e-05
+      ],
+      "Kd": [
+        0.00193683,
+        0.0025776,
+        0.00284213,
+        0.00397851,
+        0.00337727,
+        0.00389705,
+        0.00452535,
+        0.00433591
+      ]
+    },
+    "tuning_rule": "amigo",
+    "note": "MIMO relay: pid1=power loop, pid2=stick loop, both on altitude error."
+  },
+  "plane3d_circle": {
+    "alt": {
+      "Kp": 0.00037733,
+      "Ki": 9.45e-06,
+      "Kd": 0.00478836
+    },
+    "rad": {
+      "Kp": 7.84e-06,
+      "Ki": 1e-08,
+      "Kd": 0.00064308
+    },
+    "bank": {
+      "Kp": -2.2651047999999996
+    },
+    "power_pid": {
+      "Kp": 0.00029661,
+      "Ki": 4.33e-06,
+      "Kd": 0.00646024
+    },
+    "power": 0.6,
+    "target_bank_deg": 15.0,
+    "note": "coordinate descent on episode return, 3 seeds"
+  },
+  "plane3d_figure8": {
+    "alt": {
+      "Kp": 0.007268,
+      "Ki": 3.477e-05,
+      "Kd": 0.00469
+    },
+    "hdg": {
+      "Kp": 3.840921,
+      "Ki": 1.05437024,
+      "Kd": 3.1111457999999996
+    },
+    "bank": {
+      "Kp": -6.47173
+    },
+    "power_pid": {
+      "Kp": 0.00029661,
+      "Ki": 4.33e-06,
+      "Kd": 0.00646025
+    },
+    "power": 0.15,
+    "note": "coordinate descent on episode return, 3 seeds"
+  },
+  "reactor": {
+    "Kp": 2.265556,
+    "Ki": 1.33268,
+    "Kd": 1.2234,
+    "gain_schedule": {
+      "operating_points": [
+        0.3,
+        0.39999999999999997,
+        0.5,
+        0.6,
+        0.7,
+        0.7999999999999999,
+        0.8999999999999999,
+        1.0
+      ],
+      "Kp": [
+        2.45797,
+        2.45797,
+        2.45797,
+        2.351468,
+        2.265556,
+        2.259871,
+        2.243326,
+        2.240856
+      ],
+      "Ki": [
+        1.445865,
+        1.445865,
+        1.445865,
+        1.383216,
+        1.33268,
+        1.329336,
+        1.319603,
+        1.318151
+      ],
+      "Kd": [
+        1.327304,
+        1.327304,
+        1.327304,
+        1.269792,
+        1.2234,
+        1.22033,
+        1.211396,
+        1.210062
+      ]
+    },
+    "tuning_rule": "amigo",
+    "note": "Relay autotuning, positive-gain (rod withdrawal raises power)."
+  },
+  "four_tank": {
+    "pid1": {
+      "Kp": 5.0,
+      "Ki": 0.05,
+      "Kd": 0.0
+    },
+    "pid2": {
+      "Kp": 100.0,
+      "Ki": 1.0,
+      "Kd": 0.0
+    },
+    "gain_schedule_pid1": {
+      "operating_points": [
+        0.11,
+        0.12142857142857143,
+        0.13285714285714287,
+        0.1442857142857143,
+        0.15571428571428572,
+        0.16714285714285715,
+        0.17857142857142858,
+        0.19
+      ],
+      "Kp": [
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0,
+        5.0
+      ],
+      "Ki": [
+        0.0,
+        0.0,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05,
+        0.05
+      ],
+      "Kd": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "gain_schedule_pid2": {
+      "operating_points": [
+        0.11,
+        0.12142857142857143,
+        0.13285714285714287,
+        0.1442857142857143,
+        0.15571428571428572,
+        0.16714285714285715,
+        0.17857142857142858,
+        0.19
+      ],
+      "Kp": [
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0,
+        100.0
+      ],
+      "Ki": [
+        0.5,
+        0.5,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "Kd": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "tuning_rule": "grid_search_max_reward",
+    "note": "Sequential grid search over (Kp, Ki) maximizing cumulative env reward, alternating loop1/loop2 refinements. FourTank is a pure integrator -> relay autotuning fails (no zero-crossings)."
+  },
+  "patrol": {
+    "Kp_alt": 0.01,
+    "Ki_alt": 5e-05,
+    "Kd_alt": 0.025,
+    "Kp_power": 0.003,
+    "Ki_power": 3e-05,
+    "Kd_power": 0.15,
+    "cruise": 0.6,
+    "Kp_hdg": 0.284,
+    "Ki_hdg": 0.0,
+    "Kd_hdg": 1.808,
+    "Kp_bank": -4.287,
+    "Kd_bank": 3.124,
+    "blend_dist": 500.0,
+    "tuning_rule": "random_search_survival",
+    "note": "Re-searched after the heading loop was changed to command a turn rate rather than a bank angle. Commanding bank left the loop gain proportional to 1/V, a 45% swing across the speeds the follower flies, and every failing encounter spent 13-22% of its episode pinned at the 30 deg bank limit while the one that held formation never reached it. Inverting the coordinated-turn relation removed both. These gains are chosen for survival rather than settled error: 5 of 6 encounters completed against 2 of 6, at 135 m mean slot error against 130 m. Still outside the 60 m tolerance, so the formation tests remain xfail."
+  },
+  "glass_furnace": {
+    "Kp": 2.5,
+    "Ki": 0.15,
+    "Kd": 0.05,
+    "tuning_rule": "grid_search_max_reward",
+    "note": "Grid search over (Kp, Ki, Kd) maximising mean cumulative env reward. Relay autotuning fails on this plant: the crown temperature integrates the firing rate, so under a bang-bang relay it drifts without sustained zero-crossings and Astrom-Hagglund has no Ku/Tu to extract."
+  },
+  "distillation": {
+    "pid1": {
+      "Kp": 150.0,
+      "Ki": 1.0,
+      "Kd": 0.0
+    },
+    "pid2": {
+      "Kp": -150.0,
+      "Ki": -1.0,
+      "Kd": 0.0
+    },
+    "tuning_rule": "grid_search_max_reward",
+    "note": "LV pairing: yD<-L (positive gain), xB<-V (negative -- more boilup strips the bottoms cleaner, lowering xB). Grid search over (Kp, Ki); return rises monotonically to Kp~400 with no instability, but 150 captures 98% of it at a quarter of the control activity, which is the safer margin on a plant with RGA ~50."
+  },
+  "wind_turbine": {
+    "Kp_pitch": 12.0,
+    "Ki_pitch": 0.6,
+    "Kd_pitch": 0.0,
+    "tuning_rule": "grid_search_max_reward",
+    "note": "Pitch PI on rotor-speed error; generator torque is a feedforward for the power setpoint with rotor-speed protection. Return is flat above Kp~12 (392 vs 394 at Kp=25) and all episodes complete without tripping, so 12 keeps a factor-2 gain margin on a rate-limited pitch actuator."
+  },
+  "cement_kiln": {
+    "Kp_outer": 12000.0,
+    "Ki_outer": 6.0,
+    "Kp_inner": 0.025,
+    "Ki_inner": 5e-06,
+    "T_bz_base": 1765.0,
+    "tuning_rule": "grid_search_max_reward",
+    "note": "Cascade: free lime trims a burning-zone setpoint, fuel holds it, kiln speed follows feed to hold bed depth. The outer loop is strongly proportional with weak integral (Kp 12000 / Ki 6) -- integral action on a measurement half an hour behind the input oscillates at the delay period. Return 176 over 4 seeds against 37 for the best constant action."
+  },
+  "boiler_drum": {
+    "Kp_level": 60.0,
+    "Ki_level": 0.6,
+    "Kp_pressure": 0.05,
+    "Ki_pressure": 0.002,
+    "Kd_pressure": 0.0,
+    "tuning_rule": "hand_tuned_three_element",
+    "note": "Three-element: feedwater tracks measured steam flow as a feedforward and the level PI only trims it, bounded to 25 kg/s. A fast level loop reacts to swell by cutting feedwater exactly when mass is leaving fastest. Return 215-296 against 5 for the best constant action, which trips in 5-117 steps."
+  },
+  "cstr": {
+    "Kp": -112.216316,
+    "Ki": -88.012797,
+    "Kd": -45.447608,
+    "gain_schedule": {
+      "operating_points": [
+        0.84,
+        0.85,
+        0.86,
+        0.87,
+        0.88,
+        0.89,
+        0.9,
+        0.91
+      ],
+      "Kp": [
+        -93.694982,
+        -74.490578,
+        -85.604186,
+        -91.458914,
+        -112.216316,
+        -123.381295,
+        -136.507586,
+        -153.132488
+      ],
+      "Ki": [
+        -44.091756,
+        -43.817987,
+        -67.140538,
+        -71.732481,
+        -88.012797,
+        -96.769643,
+        -107.064773,
+        -120.103912
+      ],
+      "Kd": [
+        -63.244113,
+        -40.224912,
+        -34.669695,
+        -37.04086,
+        -45.447608,
+        -49.969424,
+        -55.285572,
+        -62.018657
+      ]
+    },
+    "tuning_rule": "amigo",
+    "note": "Relay autotuning, negative-gain system (higher Tc -> lower Ca)."
+  },
+  "plane_cascaded": {
+    "Kp_alt": 0.12,
+    "vs_max": 21.0,
+    "Kp_vs": 0.01,
+    "Ki_vs": 0.0016,
+    "theta_trim": 0.032,
+    "theta_max": 0.26,
+    "Kp_theta": 5.6,
+    "Kd_theta": 3.0,
+    "alpha_max": 0.13299999999999998,
+    "target_speed": 230.0,
+    "cruise_power": -0.22749999999999998,
+    "Kp_speed": 0.05,
+    "Ki_speed": 7.5e-05,
+    "note": "coordinate descent on episode return, 3 seeds"
+  },
+  "plane3d_racetrack": {
+    "track": {
+      "Kp": 0.0016799999999999999,
+      "Ki": 0.0,
+      "Kd": 0.0
+    },
+    "bank": {
+      "Kp": -2.0,
+      "Kd": -1.5
+    },
+    "note": "coordinate descent on episode return, 5 seeds"
+  }
+}

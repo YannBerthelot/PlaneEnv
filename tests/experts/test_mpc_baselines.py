@@ -202,7 +202,7 @@ def test_recorded_baseline_still_describes_this_tree(name):
     assert name in recorded, (
         f"{name}: no recorded baseline. Run "
         f"`uv run python scripts/record_baselines.py --envs {name}` and commit "
-        f"data/baseline_returns.json."
+        f"src/target_gym/data/baseline_returns.json."
     )
     current = baseline_fingerprint(spec)
     assert recorded[name]["fingerprint"] == current, (

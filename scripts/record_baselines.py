@@ -11,7 +11,7 @@ runners it approached the job's 30-minute timeout on its own.
 
 The answer only changes when the physics, the controllers or their gains change,
 which most merges do not touch. So the measurement is taken here, by hand, and
-committed to ``data/baseline_returns.json``; CI reads the recorded numbers and
+committed to ``src/target_gym/data/baseline_returns.json``; CI reads the recorded numbers and
 checks the contract against them.
 
 That is only safe if a stale record cannot pass silently. Each record carries a

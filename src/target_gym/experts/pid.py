@@ -54,7 +54,13 @@ from flax import struct
 # ---------------------------------------------------------------------------
 
 # Resolved relative to this file so it works regardless of cwd.
-_GAINS_FILE = pathlib.Path(__file__).resolve().parents[3] / "data" / "pid_gains.json"
+# ``parents[1]`` is the package, so this resolves inside it whether the code
+# is run from a checkout or an installed wheel. It was ``parents[3]``, the
+# repository root from a checkout and the interpreter's lib directory from
+# site-packages, so an installed target-gym announced "No PID gains file
+# found at /usr/local/lib/python3.13/data/pid_gains.json" and silently
+# re-ran gradient tuning for minutes on every user's first call.
+_GAINS_FILE = pathlib.Path(__file__).resolve().parents[1] / "data" / "pid_gains.json"
 _gains_cache: dict | None = None
 
 

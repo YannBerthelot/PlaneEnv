@@ -1,6 +1,6 @@
 """The gradient PID tuners are runtime, and are reachable automatically.
 
-``experts.pid`` runs ``tune_all_and_save`` whenever ``data/pid_gains.json`` is
+``experts.pid`` runs ``tune_all_and_save`` whenever ``src/target_gym/data/pid_gains.json`` is
 missing, so a user who clears the cache -- or installs without it -- gets these
 tuners rather than an error. They had no test at all.
 

@@ -13,7 +13,7 @@ forty minutes of CI on every merge before they were recorded instead of
 reproduced, so learned results reuse the mechanism rather than inventing a
 second one.
 
-Results go in `data/rl_results.json`, written through
+Results go in `src/target_gym/data/rl_results.json`, written through
 `target_gym.rl_results.record_result`, and the suite checks three things about
 each entry: that it is well formed, that it is scored over the environment's own
 episode so it sits in the same column as the PID and MPC numbers, and that it

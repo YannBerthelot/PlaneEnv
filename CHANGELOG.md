@@ -79,6 +79,35 @@ than by commit.
 
 ### Fixed
 
+- **An installed package could not find its own tuned gains.** Both
+  `experts/pid.py` and `provenance.py` resolved the data directory relative to
+  the repository root, which is correct from a source checkout and nonsense from
+  site-packages: an installed target-gym looked in
+  `/usr/local/lib/python3.13/data/`, found nothing, and silently re-ran
+  gradient tuning for minutes on every user's first PID, producing controllers
+  that need not match the published baselines. The wheel did not ship the files
+  either. `data/` now lives inside the package, is included in the wheel, and a
+  clean install builds a PID in 1.8 s with no tuning. `scripts/tune_pid.py` was
+  also writing to a path the loader no longer read, so tuning would have
+  appeared to succeed and changed nothing.
+- **Installing on a Colab TPU runtime breaks it, and the notebook now refuses.**
+  A TPU VM ships jax and jaxlib 0.7.2 matched to its `libtpu`; gymnax 1.0.0 caps
+  `jax<0.7`, so installing downgrades both to 0.6.2 and every later JAX call
+  aborts the kernel with `Unexpected PJRT_Plugin_Attributes_Args size: expected
+  32, got 24`. pip writes to the VM disk, so a plain `import jax` keeps crashing
+  until the runtime is recreated. This clears when gymnax releases with its jax
+  cap lifted.
+- **Environment pages showed broken images on the published site.** The
+  generator emitted `../videos/...`, and mkdocs serves these pages at
+  `/environments/<name>/`, so the browser asked for
+  `/environments/videos/...`. The homepage worked because it sits at the site
+  root, which is why this went unnoticed.
+- **The docs deploy died rendering the clips.** All twenty-one ran in one
+  process, and since each environment compiles its own `step_env` and XLA keeps
+  the executables alive, the cost climbed from 9 s to 92 s per environment until
+  the runner killed the job. One process per environment keeps it flat.
+
+
 - **Patrol had no MPC, for a reason that was wrong.** The obstacle on record was
   that its reference is a manoeuvring lead, so a planner would need the lead's
   future trajectory as a time-varying parameter. That is true of a CasADi model

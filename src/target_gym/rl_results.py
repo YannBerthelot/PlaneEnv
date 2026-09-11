@@ -7,7 +7,7 @@ that comparison is kept.
 It is recorded rather than reproduced, for the same reason the MPC baselines
 are: training costs GPU-hours, and the answer only moves when the environment
 or the agent moves. The mechanism is the one already used for
-``data/baseline_returns.json`` -- each record carries a fingerprint of what
+``src/target_gym/data/baseline_returns.json`` -- each record carries a fingerprint of what
 determines it, and a record whose fingerprint no longer matches the tree is
 refused rather than believed.
 
@@ -48,9 +48,9 @@ import datetime as _dt
 import json
 from typing import Any, Iterable
 
-from target_gym.provenance import _REPO, environment_fingerprint
+from target_gym.provenance import _ROOT, environment_fingerprint
 
-RL_RESULTS_PATH = _REPO / "data" / "rl_results.json"
+RL_RESULTS_PATH = _ROOT / "data" / "rl_results.json"
 
 #: Fields every record must carry. Kept explicit so a malformed record fails
 #: when it is written rather than when someone reads it into a table.

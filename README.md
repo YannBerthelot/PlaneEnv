@@ -30,7 +30,7 @@ reactor, a cement kiln, a grid battery and a wind turbine.
 
 - **Baselines included.** Every environment ships a tuned PID; 20 of 21 also
   ship an MPC with full state access, which serves as an upper bound. Both are
-  recorded over ten seeds in `data/baseline_returns.json`.
+  recorded over ten seeds in `src/target_gym/data/baseline_returns.json`.
 - **Validated physics.** Each environment carries a `PHYSICS.md` with a sourced
   parameter table, published validation targets asserted by tests, and its
   documented approximations.

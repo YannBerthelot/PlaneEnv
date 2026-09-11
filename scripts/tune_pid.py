@@ -44,7 +44,7 @@ from datetime import datetime
 
 # Resolve project root (scripts/ lives one level below root)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-GAINS_FILE = ROOT / "data" / "pid_gains.json"
+GAINS_FILE = ROOT / "src" / "target_gym" / "data" / "pid_gains.json"
 
 sys.path.insert(0, str(ROOT / "src"))
 

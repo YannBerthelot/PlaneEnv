@@ -50,12 +50,7 @@ Every environment in this suite scores on one contract: the reward is
 
 ## Baselines
 
-Measured over 10 seeds on a 200-step episode (see [Baselines](../baselines.md)):
-
-| controller | return | per step |
-|---|---|---|
-| PID | 32.0 | 0.160 |
-| MPC | 170.2 | 0.851 |
+A tuned PID ships with this environment.
 
 ## Arguments
 

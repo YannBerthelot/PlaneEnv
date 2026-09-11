@@ -780,21 +780,6 @@ _SPECS: tuple[EnvSpec, ...] = (
         test_params={"max_steps_in_episode": 360},
         tuned_gains_key="battery",
         noise_fields=("dispatch_noise_std",),
-        mpc_degraded=(
-            "This MPC loses to its own PID on 9 of 10 seeds, by 3 to 11 points "
-            "each, and its published mean leads only because of seed 0: 350.4 "
-            "against a 154.7 mean over the other nine, on a 360-step ceiling. "
-            "The PID scores a flat ~160 on every seed including that one, so "
-            "the episode is not unusually easy; only the planner sees it. "
-            "Two explanations are ruled out. It is not the fixed PRNGKey(0) "
-            "the planners use for disturbances, which would give the MPC the "
-            "true noise trajectory on seed 0 alone: every other stochastic "
-            "environment has a seed-0 ratio of ~1.0, cement_kiln included, "
-            "and that uses the same sampling planner. It is not the initial "
-            "condition either, since seed 5 starts at a similar state of "
-            "charge with a larger power target and scores 154. Quote the "
-            "per-seed win count for this environment, not the mean."
-        ),
         disturbance_fields=("target_power",),
     ),
 )

@@ -55,9 +55,6 @@ Measured over 10 seeds on a 360-step episode (see [Baselines](../baselines.md)):
 | PID | 262.0 | 0.728 |
 | MPC | 265.8 | 0.738 |
 
-!!! warning "The MPC is not an upper bound here"
-    This MPC loses to its own PID on 9 of 10 seeds, by 3 to 11 points each, and its published mean leads only because of seed 0: 350.
-
 ## Arguments
 
 | parameter | default |

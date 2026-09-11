@@ -227,30 +227,41 @@ def _merge_reports(reports: list[dict]) -> dict:
     }
 
 
-def _accelerated() -> bool:
-    """Whether JAX has a GPU or TPU to batch the seeds onto.
+def _batch_seeds() -> bool:
+    """Whether a gradient planner's ten seeds should be vmapped into one call.
 
-    This decides how the seeds are parallelised, and the right answer is the
-    opposite on the two backends.
+    Currently always yes, and the CPU case is the interesting one.
 
-    ``vmap`` is the more *efficient* of the two per unit of work -- measured on
-    patrol, 0.0043 s per iteration per seed batched against 0.0159 s serial,
-    so batching is nearly four times better per iteration. But a vmapped
-    rollout on CPU is **not multicore**: measured at 126-147% CPU of a possible
-    1400% on a fourteen-core machine, because its speedup comes from SIMD and
-    amortised dispatch rather than from using more cores. Ten processes use ten
-    cores, so on CPU they win the wall-clock despite doing the arithmetic less
-    efficiently.
+    ``vmap`` is the more efficient of the two per unit of work -- measured on
+    patrol, 0.0043 s per iteration per seed batched against 0.0159 s serial --
+    but it is **not multicore on CPU**: measured at 126-147% of a possible
+    1400% here, because its speedup comes from SIMD and amortised dispatch
+    rather than from using more cores. That argues for one process per seed on
+    CPU, and it is what this did for a while.
 
-    On a GPU the reasoning inverts. The device needs thousands of independent
-    lanes to be busy at all, so one seed leaves most of it idle and ten seeds
-    cost little more than one; meanwhile ten processes would be ten contexts
-    contending for one device. There, batching is close to free parallelism.
+    It stays batched anyway, and the honest reason is that the per-seed route
+    has **never been measured to completion here**. Two attempts: one killed at
+    26 min while still on its first environment, one killed at 37 min with five
+    of patrol's ten seeds done. The "26 min" that briefly justified switching
+    was a progress line, not a result -- the run had not finished. Against that,
+    the batched route is measured: patrol in 2755 s, the whole suite in 46 min.
+
+    There is a plausible mechanism for why it struggled, which is that the
+    worker count here is set by memory rather than cores -- each planner holds
+    0.3-1.45 GB of reverse-mode rollout, so 24 GB affords five to eight workers,
+    not fourteen -- and one worker per core exhausted RAM and drove the machine
+    into swap at load 158. But that is a hypothesis about an unfinished run, not
+    a comparison, and it should not be written down as though it were one.
+
+    On a GPU batching wins outright anyway: the device needs thousands of
+    independent lanes to be busy, so one seed leaves most of it idle, while ten
+    processes would be ten contexts contending for one device.
+
+    Worth revisiting properly: run both routes to completion on the same
+    machine, same worker count, and compare finished numbers. Until someone
+    does, batching is the only option with a measurement behind it.
     """
-    try:
-        return any(d.platform in ("gpu", "tpu") for d in jax.devices())
-    except Exception:
-        return False
+    return True
 
 
 def _split_by_planner(names: list[str]) -> tuple[list[str], list[str]]:
@@ -263,7 +274,7 @@ def _split_by_planner(names: list[str]) -> tuple[list[str], list[str]]:
     seed. IPOPT is single-threaded, so that parallelises cleanly.
 
     Whether the ones that can batch actually do is a property of the machine,
-    not of the environment -- see :func:`_accelerated`. On a GPU they batch; on
+    not of the environment -- see :func:`_batch_seeds`. On a GPU they batch; on
     CPU they get a process each, because a vmapped rollout there uses about one
     and a half cores no matter how many are free.
 
@@ -275,7 +286,7 @@ def _split_by_planner(names: list[str]) -> tuple[list[str], list[str]]:
     """
     from target_gym.experts.mpc import GradientMPC
 
-    accel = _accelerated()
+    accel = _batch_seeds()
     print(
         f"  seeds parallelised by {'vmap' if accel else 'one process each'} "
         f"({jax.default_backend()})",
@@ -320,6 +331,72 @@ def _report(name: str, row: dict) -> None:
         f"  {name:20s} PID {p:9.2f}  MPC {m:9.2f}  {verdict:22s} "
         f"term {row['mpc_terminated_early']}  {row['seconds']:6.0f}s{health}",
         flush=True,
+    )
+
+
+#: How many times a pool may die and be rebuilt before the run gives up.
+MAX_POOL_RESTARTS = 3
+
+_WORKERS = {"batch": _mpc_batch_one_env, "pid": _pid_one_seed, "mpc": _mpc_one_seed}
+
+
+def _run_jobs(jobs, workers, inflight, durations, pid_out, mpc_out, batch_out, emit):
+    """Run *jobs* to completion, surviving a pool that dies under us.
+
+    ``BrokenProcessPool`` is not recoverable in place: once a worker dies
+    abruptly the executor refuses further work, so a single dead child takes
+    down an hour-long run. It happened twice in one evening here, once under
+    genuine memory exhaustion at fourteen workers and once at eight with 17 GB
+    free, which means the cause is not fully understood -- all the more reason
+    not to let it be fatal.
+
+    So the outstanding work is tracked explicitly and a fresh pool is built for
+    whatever is left, with the worker count halved each time on the assumption
+    that a pool which just died was asking too much of the machine. Anything
+    already finished is kept: these results are independent per seed.
+    """
+    pending = list(jobs)
+    for attempt in range(MAX_POOL_RESTARTS + 1):
+        if not pending:
+            return
+        if attempt:
+            workers = max(2, workers // 2)
+            print(
+                f"  pool died with {len(pending)} job(s) outstanding; "
+                f"retrying on {workers} workers",
+                flush=True,
+            )
+        done: set[tuple[str, str, int]] = set()
+        try:
+            with cf.ProcessPoolExecutor(max_workers=workers) as pool:
+                futures = {
+                    pool.submit(
+                        _WORKERS[kind],
+                        (name, inflight) if kind == "batch" else (name, seed, inflight),
+                    ): (kind, name, seed)
+                    for kind, name, seed in pending
+                }
+                for fut in cf.as_completed(futures):
+                    job = futures[fut]
+                    kind, name, seed = job
+                    result = fut.result()
+                    if kind == "pid":
+                        pid_out[name][seed], seconds = result
+                    elif kind == "batch":
+                        *core, seconds = result
+                        batch_out[name] = tuple(core)
+                    else:
+                        *core, seconds = result
+                        mpc_out[name][seed] = tuple(core)
+                    durations.setdefault(f"{name} {kind.upper()}", []).append(seconds)
+                    done.add(job)
+                    emit(name)
+        except cf.process.BrokenProcessPool:
+            pending = [j for j in pending if j not in done]
+            continue
+        return
+    raise RuntimeError(
+        f"pool died {MAX_POOL_RESTARTS} times; {len(pending)} job(s) never ran"
     )
 
 
@@ -435,72 +512,41 @@ def main() -> int:
     durations: dict[str, list[float]] = {}
     stop = threading.Event()
 
-    with cf.ProcessPoolExecutor(max_workers=workers) as pool:
-        futures = {}
-        # Expensive environments first, and each one's MPC and PID submitted
-        # together.
-        #
-        # Together, because an environment is only checkpointed once both are
-        # in. Queueing every MPC ahead of every PID put the long pole first but
-        # meant nothing could be written until the *last* MPC seed finished,
-        # which is the reporting blackout this whole run is meant to end.
-        #
-        # Expensive first, ordered by what the previous record says each one
-        # cost, so the seeds that set the wall-clock start in the first wave
-        # instead of the last. Self-tuning: the file it reads is the one this
-        # script writes.
-        # Batched environments first: they are the longest single jobs in the
-        # suite and each occupies one worker for its whole duration, so they
-        # have to start in the first wave or they set the wall-clock alone.
-        # Their PID seeds follow immediately, so those environments can be
-        # checkpointed as soon as the batch lands.
-        for name in _by_cost(batched):
-            futures[pool.submit(_mpc_batch_one_env, (name, inflight))] = (
-                "batch",
-                name,
-                -1,
-            )
-        for name in batched:
-            for seed in range(SEEDS):
-                futures[pool.submit(_pid_one_seed, (name, seed, inflight))] = (
-                    "pid",
-                    name,
-                    seed,
-                )
-        for name in _by_cost(per_seed):
-            for seed in range(SEEDS):
-                futures[pool.submit(_mpc_one_seed, (name, seed, inflight))] = (
-                    "mpc",
-                    name,
-                    seed,
-                )
-            for seed in range(SEEDS):
-                futures[pool.submit(_pid_one_seed, (name, seed, inflight))] = (
-                    "pid",
-                    name,
-                    seed,
-                )
-        watcher = threading.Thread(
-            target=_monitor,
-            args=(inflight, durations, rows, len(live), stop),
-            daemon=True,
-        )
-        watcher.start()
+    # Every job, as (kind, name, seed), in the order they should start.
+    jobs: list[tuple[str, str, int]] = []
+    # Expensive environments first, and each one's MPC and PID submitted
+    # together.
+    #
+    # Together, because an environment is only checkpointed once both are
+    # in. Queueing every MPC ahead of every PID put the long pole first but
+    # meant nothing could be written until the *last* MPC seed finished,
+    # which is the reporting blackout this whole run is meant to end.
+    #
+    # Expensive first, ordered by what the previous record says each one
+    # cost, so the seeds that set the wall-clock start in the first wave
+    # instead of the last. Self-tuning: the file it reads is the one this
+    # script writes.
+    # Batched environments first: they are the longest single jobs in the
+    # suite and each occupies one worker for its whole duration, so they
+    # have to start in the first wave or they set the wall-clock alone.
+    # Their PID seeds follow immediately, so those environments can be
+    # checkpointed as soon as the batch lands.
+    for name in _by_cost(batched):
+        jobs.append(("batch", name, -1))
+    for name in batched:
+        jobs += [("pid", name, seed) for seed in range(SEEDS)]
+    for name in _by_cost(per_seed):
+        jobs += [("mpc", name, seed) for seed in range(SEEDS)]
+        jobs += [("pid", name, seed) for seed in range(SEEDS)]
 
-        for fut in cf.as_completed(futures):
-            kind, name, seed = futures[fut]
-            result = fut.result()
-            if kind == "pid":
-                pid_out[name][seed], seconds = result
-            elif kind == "batch":
-                *core, seconds = result
-                batch_out[name] = tuple(core)
-            else:
-                *core, seconds = result
-                mpc_out[name][seed] = tuple(core)
-            durations.setdefault(f"{name} {kind.upper()}", []).append(seconds)
-            emit(name)
+    watcher = threading.Thread(
+        target=_monitor,
+        args=(inflight, durations, rows, len(live), stop),
+        daemon=True,
+    )
+    watcher.start()
 
+    _run_jobs(jobs, workers, inflight, durations, pid_out, mpc_out, batch_out, emit)
     stop.set()
 
     _write(rows)

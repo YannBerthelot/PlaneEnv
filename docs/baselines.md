@@ -551,13 +551,16 @@ Subtle objective errors are below its resolution; this table is what finds
 them. Those three percentages were measured under the previous reward and have
 not been re-derived -- reverting each fix again costs hours and would restate a
 conclusion about the contract's *resolution*, which the reward change does not
-alter. One environment is recorded as `EnvSpec.mpc_degraded` and xfails
-with its measured reason, so a known gap is explicit rather than absent. It is
-the battery: its MPC loses to its own PID on 9 of 10 seeds and its mean leads
-only on the strength of seed 0, which scores 350.4 against 154.7 for the other
-nine. The registry entry records what that is *not* -- not the fixed
-`PRNGKey(0)` the planners use for disturbances, since every other stochastic
-environment has a seed-0 ratio near 1.0, and not the initial condition either.
+alter. No environment is currently recorded as `EnvSpec.mpc_degraded`. The field
+exists so that a baseline which runs but does not beat its own PID is an
+explicit, measured gap rather than a silently bad benchmark number, and two
+entries have been retired from it by fixing the cause rather than the wording.
+
+The glass furnace MPC was 16.0% behind its PID and lost 10 of 10 seeds; it now
+leads on all ten, and the last piece was variable scaling. The battery MPC lost
+on 9 of 10 with its mean carried entirely by seed 0, where the planner happened
+to share the plant's PRNG key and so knew the future noise exactly; closing that
+leak and reshaping the dispatch signal took it to 8 of 10 on merit.
 
 ## What a longer episode exposed
 
@@ -789,6 +792,7 @@ clean. Hence cross-entropy sampling rather than a gradient method.
 | `plane3d_circle` | 300 | 130.4 | 276.1 | 0.435 | 0.920 | 10/10 | 0 |
 | `plane3d_racetrack` | 650 | 303.7 | 614.1 | 0.467 | 0.945 | 10/10 | 0 |
 | `plane_sine` | 480 | 294.8 | 458.1 | 0.614 | 0.954 | 10/10 | 0 |
+| `patrol` | 200 | 111.2 | 168.1 | 0.556 | 0.841 | 10/10 | 0 |
 | `distillation` | 200 | 122.2 | 154.6 | 0.611 | 0.773 | 10/10 | 0 |
 | `boiler_drum` | 400 | 247.7 | 303.0 | 0.619 | 0.758 | 10/10 | 0 |
 | `plane_energy` | 1200 | 741.7 | 907.6 | 0.618 | 0.756 | 10/10 | 0 |
@@ -797,12 +801,12 @@ clean. Hence cross-entropy sampling rather than a gradient method.
 | `cstr` | 100 | 89.4 | 94.6 | 0.894 | 0.946 | 10/10 | 0 |
 | `glass_furnace` | 1600 | 1443.5 | 1513.4 | 0.902 | 0.946 | 10/10 | 0 |
 | `reactor` | 8640 | 703.9 | 1080.7 | 0.081 | 0.125 | 10/10 | 0 |
+| `wind_turbine` | 400 | 331.8 | 348.3 | 0.829 | 0.871 | 8/10 | 0 |
 | `cement_kiln` | 700 | 621.5 | 647.7 | 0.888 | 0.925 | 10/10 | 0 |
-| `battery` | 360 | 160.8 | 174.2 | 0.447 | 0.484 | 1/10 ⚠️ | 0 |
 | `plane` | 280 | 249.2 | 259.1 | 0.890 | 0.925 | 9/10 | 0 |
 | `hvac` | 720 | 377.7 | 401.0 | 0.525 | 0.557 | 10/10 | 0 |
-| `wind_turbine` | 400 | 331.8 | 343.9 | 0.829 | 0.860 | 9/10 | 0 |
 | `first_order` | 100 | 93.0 | 95.4 | 0.930 | 0.954 | 10/10 | 0 |
+| `battery` | 360 | 262.0 | 265.8 | 0.728 | 0.738 | 8/10 | 0 |
 
 `share` is the mean return over the episode's ceiling, so 1.000 would be
 perfect tracking on every step. It is comparable across rows; the raw

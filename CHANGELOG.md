@@ -319,9 +319,15 @@ than by commit.
 
 ### Known gaps
 
-- Both patrol variants ship a PID, but it holds formation only loosely --
-  roughly 139 m of settled slot error against a 60 m tolerance, pinned by six
-  `strict` xfail cases.
+- ~~Both patrol variants hold formation only loosely, roughly 139 m of settled
+  slot error against a 60 m tolerance.~~ **Resolved.** The error was exactly
+  linear in the lead's turn rate and exactly symmetric in its sign, 25.9 m per
+  0.001 rad/step, which is proportional control against a rotating reference
+  rather than a mistuning; no gain could close it because the term was missing.
+  Feeding the lead's turn rate forward takes the hardest case from 77.8 m to
+  2.4 m, against a 3 m reward precision floor, and both variants now settle
+  around 40 m at the benchmark settings, inside the 60 m tolerance. The strict
+  xfail is removed.
 - ~~Two of the seven gradient PID tuners return NaN gains.~~ **Resolved**, and
   the cause turned out to be one line. `plane.dynamics.aero_coefficients` wrote
   its stall blend as `CL_linear / (1 + exp(u))`; past about 77 degrees of

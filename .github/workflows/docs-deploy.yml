@@ -65,7 +65,22 @@ jobs:
       env:
         SDL_VIDEODRIVER: dummy
         MPLBACKEND: Agg
-      run: uv run python -m target_gym.runners.runners --only videos
+      # One process per environment, not one for all twenty-one.
+      #
+      # Rendering them in a single process is what the module does by default,
+      # and on a runner it dies: each environment compiles its own step_env and
+      # XLA keeps those executables and their device buffers alive, so the cost
+      # climbs from 9 s per environment for the aircraft to 92 s for the cement
+      # kiln, and the job was killed with SIGTERM partway through the nineteenth.
+      # A fresh process per environment releases all of it and the total comes
+      # in lower despite paying JAX start-up twenty-one times.
+      run: |
+        envs=$(uv run python -c "from target_gym.registry import REGISTRY; print(' '.join(REGISTRY))")
+        for env in $envs; do
+          echo "::group::render $env"
+          uv run python -m target_gym.runners.runners --only videos --env "$env"
+          echo "::endgroup::"
+        done
 
     - name: Build the site
       run: uv run mkdocs build --strict

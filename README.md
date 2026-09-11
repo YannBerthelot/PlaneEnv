@@ -147,13 +147,14 @@ setpoint, and now you can crash into it.
 
 ### Rendering
 
-Every environment comes with visuals. The non-aircraft plants share one control-room
-toolkit (`target_gym/render_kit.py`): a live plant schematic, an instrument
-stack with limit and setpoint markers, and strip charts. The schematics are
-drawn from state the controller usually *cannot* see, like riser voidage,
-thermal mass, or the kiln's axial profile. So a frame shows you both what the
-agent measures and what it is actually up against, with a purple dot on each
-hidden quantity.
+Every environment draws a control-room dashboard rather than a plot: a live
+plant schematic, an instrument stack with limit and setpoint markers, and strip
+charts. The schematics are drawn from state the controller usually *cannot*
+see, like riser voidage or the kiln's axial profile, and those quantities are
+marked, so a frame shows both what the agent measures and what it is actually
+up against.
+
+**[Rendering guide →](docs/rendering.md)**
 
 ### Complexity
 

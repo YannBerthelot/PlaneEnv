@@ -107,7 +107,13 @@ See the [environment reference](environments.md) for every registry name.
 
 ## Rendering
 
-Each environment renders a control-room dashboard:
+Each environment renders a control-room dashboard: a live plant schematic, an
+instrument stack with limit and setpoint markers, and strip charts. Quantities
+the controller cannot measure are marked, so a frame shows both what the agent
+knows and what it is up against.
+
+Full guide, including the two rendering toolkits, headless setup and how to
+regenerate the shipped media: **[Rendering](rendering.md)**.
 
 ```python
 from target_gym import Plane, PlaneParams

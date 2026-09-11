@@ -82,6 +82,7 @@ nav:
   - Home: index.md
   - Getting started: getting-started.md
   - Target MDPs: target-mdp.md
+  - Rendering: rendering.md
   - Environments:
       - Overview: environments.md
       - Complexity ladder: complexity.md

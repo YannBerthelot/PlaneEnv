@@ -603,8 +603,18 @@ _SPECS: tuple[EnvSpec, ...] = (
             "relative position and filtering. Measured performance matches "
             "the full-observation expert (4 of 8 seeds complete, ~229 m "
             "settled slot error vs ~260 m), so the partial observation costs "
-            "essentially nothing here. No MPC: the follower's plant is the "
-            "full 3D aircraft and the reference is a manoeuvring lead."
+            "essentially nothing here. "
+            "No MPC, and the reason is the withheld observation rather than "
+            "the manoeuvring lead. This note used to blame the lead, on the "
+            "grounds that an MPC would need its future trajectory as a "
+            "time-varying parameter. That holds for a CasADi model and not "
+            "for a gradient planner: `patrol` now ships a GradientMPC that "
+            "differentiates step_env, and because the lead is scripted and "
+            "deterministic the plan propagates it for free. What blocks one "
+            "here is that the planner reads the slot error out of the state, "
+            "which is precisely what this variant withholds. Handing it the "
+            "true state anyway would make it an oracle on a task defined by "
+            "what is hidden, so it needs a planner built on the estimator."
         ),
     ),
     # -- Process control ----------------------------------------------------

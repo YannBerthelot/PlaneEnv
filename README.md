@@ -167,8 +167,9 @@ kiln's 25-minute transport delay and the multi-agent patrol at tier 6.
 
 ## Baselines
 
-All 21 environments ship a tuned PID, and 20 of them an MPC, so you have
-something real to beat from the first run. Structure matters more than gains
+All 21 environments ship a tuned PID, and 20 an MPC, so you have something real
+to beat from the first run. The exception is `patrol_bearing_only`, which hides
+the slot error a planner would read, since that is the point of the variant. Structure matters more than gains
 here, and the baselines are chosen to show it: three-element control on the
 boiler drum so the level gauge cannot lie to the controller, a cascade on the
 kiln because integral action on a half-hour-old measurement oscillates at the

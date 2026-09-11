@@ -79,6 +79,42 @@ than by commit.
 
 ### Fixed
 
+- **Patrol had no MPC, for a reason that was wrong.** The obstacle on record was
+  that its reference is a manoeuvring lead, so a planner would need the lead's
+  future trajectory as a time-varying parameter. That is true of a CasADi model
+  and irrelevant to a gradient planner: the lead is scripted and deterministic,
+  so differentiating `step_env` propagates it for free. `patrol` now ships a
+  `GradientMPC` leading its PID by 51% at 0.84 of ceiling. `patrol_bearing_only`
+  still has none, and now says why: it withholds the slot error a planner reads,
+  which is the point of the variant.
+- **The patrol PID was missing a term, not mistuned.** Its settled error was
+  exactly linear in the lead's turn rate and exactly symmetric in its sign, 25.9 m
+  per 0.001 rad/step, which is proportional control against a rotating reference.
+  A grid search over the gains had never closed it because no gain could.
+  Feeding the lead's turn rate forward takes the hardest case from 77.8 m to
+  2.4 m against a 60 m tolerance and a 3 m reward precision floor.
+- **The patrol lead never manoeuvred.** It drew one turn rate at reset and held
+  it for the whole episode, which a single feedforward term cancels outright, so
+  the task rewarded no anticipation and its MPC had nothing to plan against. The
+  lead now flies a routed circuit of eight legs, and settled error goes from
+  2.4 m to 8-13 m with turn onsets measurably worse than mid-leg.
+- **Default parameters now match the configuration the baselines are recorded
+  at**, for the eleven environments that do not share a params class with a
+  sibling, and their redundant `test_params` entries are gone. The episode
+  lengths that became defaults are the reasoned ones; the old defaults were not,
+  all nine aircraft having said exactly 10 000.
+- **`requires-python` allowed 3.14, which jaxlib has no wheel for.** A clean
+  `uv sync` resolved CPython 3.14.6 and failed on jaxlib; the test matrix listed
+  3.14 as well, so that job could never have passed. Both stop at 3.13.
+- **The episode-length rule stated a criterion nobody could check.** It asked for
+  `N >= max(10 * tau_actuator, 3 * T_period)` while a later section of the same
+  document recorded relaxing the period clause to one lap, and `tau_actuator`
+  does not exist for two thirds of the suite: nine environments integrate, the
+  aircraft oscillate under a held elevator, and the glass furnace does not settle
+  inside eight thousand steps. The rule now says where it applies and what sets
+  the episode elsewhere.
+
+
 - **The MPC could see the future, once every ten seeds.** `GradientMPC` and
   `SamplingMPC` roll the real environment forward to score a plan, under a
   hardcoded `jax.random.PRNGKey(0)`, while `rollout` drives the plant with

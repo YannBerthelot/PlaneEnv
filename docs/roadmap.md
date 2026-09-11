@@ -42,7 +42,7 @@ what is broken and recorded rather than hidden.
 
       **Blocking, and fatal on first contact if missed:**
 
-      - [ ] **Release before advertising.** PyPI is at 0.5.0. The 22
+      - [ ] **Release before advertising.** PyPI is at 0.5.0. The 21
         environments, the restructured README, the gallery and the versioning
         are all unreleased, so anyone acting on a post today installs the old
         package. This also clears the stale PyPI summary, which still mentions a
@@ -52,15 +52,14 @@ what is broken and recorded rather than hidden.
         `tests/test_env_versions.py`, which fails when an environment's
         fingerprint moves without its version being bumped. Every environment
         ships as `v1`.
-      - [ ] **Baselines re-recorded and green.** In progress, and now all
-        twenty rather than the eight that were outstanding: the two controller
-        fixes above touch `experts/pid.py` and `experts/mpc.py`, which the
-        baseline fingerprint hashes whole, so the twelve plants recorded on
-        5 September are stale too. This is the cost the fingerprint-scoping
-        item below is about. The aircraft are the long pole and should run
-        under `caffeinate` so a sleeping machine does not stall them again;
-        the 15.5 hours the glass furnace took on the last run is what that
-        looks like when it does.
+      - [x] **Baselines re-recorded and green.** Done: all twenty environments
+        with an MPC, recorded in one 39-minute run, every MPC leading its PID,
+        no environment terminating early on any seed, and all seven CasADi
+        plants reporting 100% solver convergence across 119 600 solves.
+        `EnvSpec.mpc_degraded` is empty for the first time, both entries retired
+        by fixing their cause. The furnace, which began at 16% behind its own
+        PID with one seed running seventy minutes against a three-minute
+        median, now leads on all ten seeds.
       - [x] **Host the documentation.** Done: `.github/workflows/docs-deploy.yml`
         builds with `mkdocs build --strict` and deploys via
         `actions/deploy-pages@v4`, with a `workflow_dispatch` trigger so the
@@ -133,30 +132,28 @@ what is broken and recorded rather than hidden.
 
       **Presentation, before anyone looks at it:**
 
-      - [ ] **The media is stale.** All 40 gifs were rendered on 2026-09-09,
-        and 25 environment modules have changed since -- including two whose
-        *task* changed, not just their internals. The battery clips show a
-        dispatch signal that no longer exists (an OU random walk, now a
-        schedule of 300 s market blocks) and the patrol clips show a lead
-        holding one constant turn rate (now a routed circuit of eight legs).
-        Those two are showing behaviour the library no longer has, which is
-        worse than being merely out of date. Regenerate with `make videos`,
-        then `make short-gifs`, and rebuild the gallery mosaics. Do it *after*
-        the final baseline record, so the media and the numbers describe the
-        same tree, and check the aircraft clips in particular since the
-        renderer was reworked in the same window.
-      - [ ] **The README is too long.** 410 lines and 3199 words across
-        fourteen top-level sections, which is a document rather than a landing
-        page: a reader deciding whether this library is for them has to scroll
-        past physics validation, performance benchmarks and related projects
-        before reaching anything actionable. Most of it already exists in
-        `docs/`, so the fix is mostly deletion and linking, not rewriting.
-        Keep what answers "what is this, why would I use it, how do I start":
-        the gallery, one paragraph of positioning, install, quickstart, the
-        environment table, and the baselines claim. Move physics validation,
-        performance, related projects and the roadmap summary out to the pages
-        that already carry them. Worth doing once the docs site is live, since
-        that is what makes linking out cheap.
+      - [x] **The media is stale.** Done: all 21 clips re-rendered, the console
+        ones re-quantised through `scripts/make_gallery_clips.py`, and the five
+        mosaics rebuilt. Nineteen `mpc_output*.gif` files were deleted with
+        them: nothing referenced them, not the page generator, not the mosaics,
+        not the Makefile, and they were 114 MB of a 246 MB directory. The
+        flagship captions also lost their jargon ("non-minimum phase" told a
+        reader nothing; the four-tank's problem is that the obvious valve
+        pairing is unstable).
+      - [x] **The README is too long.** Done: 410 lines and 3199 words to 331
+        and 1718. Reference material moved rather than deleted (the validation
+        findings to `PHYSICS_METHODOLOGY.md`, the complexity ladder to its own
+        page, the throughput table to a link), the second person removed
+        entirely, and the quickstart rewritten on the direct `Plane()` API
+        instead of the registry. Four wrong numbers came out with it, including
+        a throughput range this roadmap's own trim had invented.
+      - [x] **Publishable media reaches the site.** Done, and it was broken:
+        `docs/videos` is a symlink into a directory whose `*.gif` files are
+        gitignored, so a local `mkdocs build --strict` passed on a working tree
+        that happened to have the clips while a CI build from a clean checkout
+        would have published twenty-one environment pages of broken images.
+        `docs-deploy` now renders them before building. Only the five mosaics
+        are committed, which is what the README and the environment index embed.
 
       **Worth doing, cheap:**
 
@@ -233,6 +230,28 @@ what is broken and recorded rather than hidden.
       kelvin-hour of off-spec glass against money per GJ of gas, both of which
       are quotable. It also needs the controller's surrogate to inherit the same
       exchange rate rather than re-deriving it, which is the band item above.
+
+* [ ] **Justify the glass furnace's episode length with something measurable.**
+      Its 1600 steps and the 0.99938 discount derived from them rest on a crown
+      response of 132 steps, and the physics no longer has one. Since it gained a
+      regenerator, a reversal cycle, a 120 s thermocouple lag and a two-step fuel
+      dead time, the open-loop step response does not settle at all on this
+      timescale: 822 steps at a 1600-step probe window, 1520 at 3200, 2383 at
+      5760, 3415 at 11520. It keeps growing with the window, which means there is
+      no time constant to quote rather than a large one.
+
+      This does not invalidate the recorded return, which is measured over a
+      fixed 1600-step episode either way. What it invalidates is the *reason*
+      that episode is 1600. Something has to replace it: the setpoint schedule
+      (the crown target steps `N_SETPOINTS` times, so an episode could be defined
+      as some number of schedule segments), or the reversal period, or a settling
+      criterion measured on the closed loop rather than open loop.
+
+      An attempt to enforce the episode-length rule as a test was withdrawn for
+      related reasons, recorded in the episode-length section of
+      [rl-protocol.md](rl-protocol.md): `tau_actuator` does not exist for two
+      thirds of this suite, and measuring it inside the episode under judgement
+      makes the criterion circular.
 
 * [ ] **Measurement noise, anywhere.** Not one of the environments has any.
       Every controller in the suite reads the exact state, filtered only where a

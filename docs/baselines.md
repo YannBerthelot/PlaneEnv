@@ -435,23 +435,34 @@ picks up reward changes without any objective to re-derive.
 ```bash
 make figures          # or figures-<env>
 make videos           # or videos-<env>
-make short-gifs       # lightweight *_short.gif copies, which are what is committed
+make short-gifs       # lightweight *_short.gif copies, inputs to the mosaics
 ```
 
-The committed media does **not** currently round-trip through these targets, and
-that is worth knowing before you regenerate anything:
+**What is committed, and what is not.** Only the five gallery mosaics
+(`videos/mosaic_*.webp`) are tracked, because they are the only media a
+published page embeds: the README and the environment index carry them. The
+per-environment clips are rendered by the `docs-deploy` workflow before it
+builds the site, so a clean checkout is light and the published pages still
+have their pictures.
+
+This matters because it used to be the other way round and silently broken.
+`.gitignore` excluded `videos/**/*.gif` but made an exception for
+`*_short.gif`, while `scripts/generate_env_pages.py` deliberately embeds
+`pid_output.gif`. The repository therefore carried 55 MB of shorts that nothing
+published referenced, and lacked every file the environment pages actually
+pointed at. A local `mkdocs build --strict` passed anyway, because the working
+tree happened to have the clips; a build from a clean checkout would have
+published twenty-one pages of broken images.
+
+A few things still do not round-trip through the targets above, and are worth
+knowing before regenerating anything:
 
 - The runner writes `sweep.png`, `pid_response.png` and `comparison.png`, none of
   which are tracked. The five tracked `figures/**/*.png` come from an older
   script and are not reproduced by `make figures`.
-- `make videos` writes the 3D aircraft tasks to `videos/plane3d_heading/` while
-  the committed gifs live at `videos/<env>/pid_output.gif`.
-- Regenerating `cstr` produces a 5-frame 1400x750 gif where the committed one is
-  80 frames at 760x407, so the episode length and figure size used for the
-  committed media are not the current defaults.
-
-Until that is reconciled, regenerate media deliberately and compare frame counts
-and sizes before committing, rather than taking whatever the target emits.
+- `scripts/make_gallery_clips.py` re-quantises the console clips; `make
+  short-gifs` only trims frames. The mosaics prefer `*_short.gif`, so rebuilding
+  them needs the shorts present locally.
 
 ## What the suite guarantees
 

@@ -31,7 +31,9 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Rendering 21 clips is the bulk of this job: about eight minutes on a
+    # developer machine, and a GitHub runner has fewer and slower cores.
+    timeout-minutes: 45
     env:
       UV_PYTHON: "3.13"
     steps:
@@ -46,6 +48,24 @@ jobs:
       # mkdocstrings imports the package to read its docstrings, so this needs
       # the runtime as well as the docs group.
       run: uv sync --frozen --group dev --group docs
+
+    # The per-environment clips are not in the repository.
+    #
+    # ``docs/videos`` is a symlink to ``videos/``, and ``.gitignore`` excludes
+    # ``videos/**/*.gif`` because the rendered clips run to tens of megabytes.
+    # A local ``mkdocs build`` therefore passes on a working tree that happens
+    # to have them, and a CI build from a clean checkout would publish 21
+    # environment pages with broken images. Rendering them here keeps the
+    # repository light and the site correct; only the five gallery mosaics,
+    # which the README and the environment index embed, are committed.
+    #
+    # Headless: pygame needs a dummy video driver and matplotlib a
+    # non-interactive backend, or the renderers abort with no display.
+    - name: Render the environment clips
+      env:
+        SDL_VIDEODRIVER: dummy
+        MPLBACKEND: Agg
+      run: uv run python -m target_gym.runners.runners --only videos
 
     - name: Build the site
       run: uv run mkdocs build --strict

@@ -42,11 +42,15 @@ from target_gym.registry import GROUPS, REGISTRY, display_name  # noqa: E402
 # liked. All four share the console's 1.87:1 frame, which the 3D aircraft clips
 # (3.0:1) do not -- mixing those in letterboxes every tile down to the shortest,
 # and at two columns that waste is very visible.
+# Captions name the difficulty in plain terms. "non-minimum phase" was here and
+# told a reader nothing; the four-tank's actual problem is that the obvious
+# pairing of valves to tanks is unstable, which is both concrete and the reason
+# the shipped PID crosses its loops.
 FLAGSHIP = (
-    ("plane_energy", "Aircraft - altitude and airspeed"),
-    ("four_tank", "Process - non-minimum phase"),
+    ("plane_energy", "Aircraft - hold altitude and airspeed at once"),
+    ("four_tank", "Process - the obvious valve pairing is unstable"),
     ("glass_furnace", "Industrial - 6 of 9 states hidden"),
-    ("wind_turbine", "Energy - unmeasured turbulent inflow"),
+    ("wind_turbine", "Energy - turbulent inflow, unmeasured"),
 )
 
 # Columns per set. Two for the flagship is the whole point of it: the tiles are

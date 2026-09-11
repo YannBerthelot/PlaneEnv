@@ -56,39 +56,30 @@ Also available as a [Colab notebook](https://colab.research.google.com/github/Ya
 ```python
 import jax
 import numpy as np
-from target_gym.provenance import load_recorded_baselines
-from target_gym.registry import REGISTRY
-from target_gym.runners.runners import baseline_policy
+from target_gym import Plane, PlaneParams
 
-spec = REGISTRY["plane"]
-env, params = spec.make_env(), spec.make_test_params()
+env = Plane()
+params = PlaneParams()          # or env.default_params
+pid = env.make_pid()            # the shipped baseline, tuned
 
+key = jax.random.PRNGKey(0)
+obs, state = env.reset(key, params)
 
-def evaluate(policy, seed):
-    key = jax.random.PRNGKey(seed)
-    obs, state = env.reset_env(key, params)
-    total = 0.0
-    for _ in range(int(params.max_steps_in_episode)):
-        action = policy(np.asarray(obs), state)
-        obs, state, reward, terminated, _ = env.step_env(key, state, action, params)
-        total += float(reward)
-        if bool(terminated):
-            break
-    return total
+total = 0.0
+for _ in range(params.max_steps_in_episode):
+    action = pid(np.asarray(obs))
+    obs, state, reward, terminated, truncated, _ = env.step(key, state, action, params)
+    total += float(reward)
+    if terminated or truncated:
+        break
 
-
-print("PID:", evaluate(baseline_policy(spec, "pid", params), seed=0))
-
-# MPC returns are pre-recorded on the same seeds, so re-running them is optional
-# and costs minutes per seed.
-print("MPC:", load_recorded_baselines()["plane"]["mpc_returns"][0])
+print("PID return:", total)
 ```
 
-Baselines and learned policies share the `(obs, state)` signature, so one
-evaluation loop serves all three. The PID reads `obs` only, as a plant
-controller does. The MPC reads `state`, including quantities the observation
-withholds, which is what makes it an upper bound rather than a peer;
-[docs/baselines.md](docs/baselines.md) quantifies the resulting advantage.
+`env.reset(key)` and `env.step(key, state, action)` follow the
+[gymnax](https://github.com/RobertTLange/gymnax) API and fall back to
+`env.default_params`. Every environment also exposes `make_pid()`,
+`make_mpc()` and `save_video()`.
 
 <details>
 <summary>Non-JAX libraries, e.g. stable-baselines3</summary>
@@ -113,6 +104,32 @@ while True:
 ```
 
 </details>
+
+### Comparing against the baselines
+
+Published PID and MPC returns are recorded at each environment's benchmark
+settings, which differ from the defaults (`plane` runs 10 000 steps by default
+and is scored over 280). `EnvSpec` carries those settings:
+
+```python
+import numpy as np
+
+from target_gym.provenance import load_recorded_baselines
+from target_gym.registry import REGISTRY
+from target_gym.runners.runners import baseline_policy, rollout
+
+spec = REGISTRY["plane"]
+params = spec.make_test_params()                     # the scored configuration
+pid = baseline_policy(spec, "pid", params)
+
+print("PID:", float(np.sum(rollout(spec, params, pid, seed=0)[2])))
+print("MPC:", load_recorded_baselines()["plane"]["mpc_returns"][0])
+```
+
+The PID reads `obs` only, as a plant controller does. The MPC reads the full
+state, including quantities the observation withholds, which is what makes it
+an upper bound rather than a peer; [docs/baselines.md](docs/baselines.md)
+quantifies the resulting advantage.
 
 Vectorised rollouts, the registry API, the patrol interface and the wind model
 are covered in [docs/getting-started.md](docs/getting-started.md).

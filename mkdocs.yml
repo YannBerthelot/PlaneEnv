@@ -84,6 +84,7 @@ nav:
   - Target MDPs: target-mdp.md
   - Environments:
       - Overview: environments.md
+      - Complexity ladder: complexity.md
       - Aircraft:
           - Plane: environments/plane.md
           - Plane Sine: environments/plane_sine.md

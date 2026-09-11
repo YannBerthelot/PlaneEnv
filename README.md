@@ -92,8 +92,10 @@ reading instruments as a plant controller does, while **the MPC ignores `obs`**,
 reading the true state because it is a full-state *ceiling* rather than a peer.
 A benchmark whose upper bound sees more than its contestants should say so.
 
-Or use your favourite RL library, JAX or not (stable-baselines3 here). Note
-that you only get end-to-end GPU with a JAX-based one:
+<details>
+<summary>Or use your favourite RL library, JAX or not (stable-baselines3)</summary>
+
+Note that only a JAX-based library gives you end-to-end GPU.
 
 ```python
 # doc: skip (trains for 10 000 steps; tests/plane/test_agent.py covers this path)
@@ -111,6 +113,9 @@ while True:
     if terminated or truncated:
         break
 ```
+
+</details>
+
 
 **[docs/getting-started.md](docs/getting-started.md)** covers the rest: driving
 `step_env` directly, vectorising rollouts with `vmap` and `scan`, working from
@@ -152,35 +157,13 @@ hidden quantity.
 
 ### Complexity
 
-There is a wide difficulty range here, so you can use the suite as a curriculum
-and not just a benchmark. Tiers weigh both the **dynamics** (linearity,
-coupling, stiffness) and the **RL side** (dimensionality, horizon, partial
-observability).
+The suite spans six difficulty tiers, weighing both the dynamics (linearity,
+coupling, stiffness) and the RL side (dimensionality, horizon, partial
+observability), so it works as a curriculum and not only as a benchmark:
+a first-order lag at tier 1, the cement kiln's 25-minute transport delay and
+the multi-agent patrol at tier 6.
 
-| Tier | Environment | Obs | Act | Dynamics | Key RL challenges |
-|---|---|---|---|---|---|
-| 1 (Trivial) | First Order System | 2 | 1 | Linear SISO | Baseline sanity-check |
-| 2 (Medium) | CSTR | 3 | 1 | Nonlinear SISO | Exponential Arrhenius kinetics, stiff dynamics, exothermic runaway risk |
-| 3 (Hard) | Building HVAC | 7 | 1 | Linear RC network | **Partial observability** (thermal mass hidden), 43 h time constant, setback anticipation, comfort/energy trade-off |
-| 3 (Hard) | Four Tank | 6 | 2 | Nonlinear MIMO | **Non-minimum phase** (gamma1+gamma2 = 0.4): the RGA element is *negative*, so the obvious diagonal pairing is unstable and the loops must be crossed |
-| 3 (Hard) | Grid Battery | 5 | 1 | Nonlinear ECM | **Finite budget**: tracking now costs the ability to track later; irrecoverable charge limits, state-dependent efficiency |
-| 4 (Very Hard) | Wind Turbine | 6 | 2 | Nonlinear aero-elastic | Turbulent unmeasured inflow, region switching, drive-train torsion, thrust/power trade-off |
-| 4 (Very Hard) | pH Neutralisation | 3 | 1 | Implicit algebraic | 45x steady-state gain variation across the range, unmeasured buffering, same pH from different states |
-| 4 (Very Hard) | Binary Distillation | 6 | 2 | Stiff nonlinear MIMO | **Ill-conditioned** (condition number ~140): the two purities move together far more easily than apart |
-| 4 (Very Hard) | Plane 2D | 10 | 2 | 2D aerodynamics | Coupled nonlinear aerodynamics, very long horizon |
-| 4 (Very Hard) | Glass Furnace | 5 | 1 | Nonlinear radiation (T^4) | **Partial observability** (6/9 states hidden), regenerator reversal cycle, multi-hour transients, batch-blanket nonlinearity |
-| 4 (Very Hard) | Nuclear Reactor | 4 | 1 | Stiff multi-timescale | **Partial observability** (7/11 states hidden), xenon memory trap, 86k-step horizon |
-| 5 (Extreme) | Boiler Drum | 7 | 2 | Nonlinear, two-phase | **Non-minimum phase**: the level's first move is the wrong way. Integrating output, irrecoverable trips both sides, hidden riser voidage |
-| 5 (Extreme) | Plane 3D Heading | 15 | 3 | 3D aerodynamics | Multi-objective (altitude + heading), roll/pitch/yaw coupling |
-| 5 (Extreme) | Plane 3D Circle | 17 | 3 | 3D + path following | Sustained coordinated banked turns, km-scale circular path |
-| 5 (Extreme) | Plane Patrol | 26 | 3 | 3D + moving target | **Non-stationary manoeuvring reference**, relative-frame observation, collision (irrecoverable) |
-| 6 (Extreme+) | Cement Kiln | 8 | 2 | Distributed (1D advection + Arrhenius) | **Transport delay**: half the response to a fuel change takes a full 25-min residence time. 64 hidden states behind 8 measurements, one input that moves the delay itself |
-| 6 (Extreme+) | Plane 3D Figure Eight | 19 | 3 | 3D + twisted lemniscate | 3D path with altitude crossovers, direction reversal |
-| 6 (Extreme+) | Plane Patrol MARL | 18 / 26 | 3 + 3 | 3D two-body | **Multi-agent coordination**, non-stationary co-player, shared collision state |
-
-The target-pattern variants (`plane_sine`, `plane_energy`) and
-the 3D holding pattern (`plane3d_racetrack`) share their base aircraft's plant
-and therefore its tier; what differs is the reference they must track.
+**[The full ladder, with observation and action widths →](docs/complexity.md)**
 
 ---
 
@@ -232,24 +215,13 @@ these are the failure modes that come with it:
 | **Multi-timescale** | Millisecond neutronics against hour-long xenon; sub-second flame gas against 30 h glass residence |
 | **Finite budgets** | A battery whose tracking *now* costs the ability to track later |
 
-On top of those, the suite deliberately models:
-
-* **Actuator lag**: inputs such as engine power take time to fully apply.
-* **Competing objectives**: reach the target quickly while minimising
-  overshoot or cost.
-* **Anticipation**: scheduled setpoints reward acting *before* the step. The
-  building's night setback and the furnace's crown schedule are both unreachable
-  by a purely reactive controller.
-* **Moving, non-stationary targets**: the patrol slot tracks a manoeuvring
-  lead aircraft.
-* **Multi-agent coordination**: the MARL patrol task requires the team to
-  cooperate on formation *and* trackable flight.
-* **Disturbances**: every plane-based environment inherits a full wind model
-  as a physics-engine property: steady wind (`wind_x/y/z`), altitude-dependent
-  **shear** (`wind_shear_x/y`), and **Ornstein-Uhlenbeck turbulence**
-  (`turbulence_sigma`), all applied to the air-relative aerodynamics. Formations
-  feel one shared gust field. Wind is *unobservable* by default;
-  `Plane(observe_wind=True)` exposes it for a fully-observable baseline.
+On top of those, the suite deliberately models actuator lag, competing
+objectives, **anticipation** (scheduled setpoints that a purely reactive
+controller cannot reach: the building's night setback, the furnace's crown
+schedule, the battery's dispatch blocks), moving targets such as the patrol
+slot behind a manoeuvring lead, multi-agent coordination in the MARL patrol
+task, and a full wind model on every aircraft -- steady wind, altitude shear
+and Ornstein-Uhlenbeck turbulence, unobservable by default.
 
 ---
 
@@ -266,26 +238,9 @@ values, L/D ratios, thermal time constants, energy balances, equilibria. A test
 that recomputes the code's own expression would pass just as happily on a wrong
 one.
 
-<details>
-<summary>What each model is checked against, and something it caught</summary>
-
-| Environment | Validated against | Example finding |
-|---|---|---|
-| Plane 2D | ISA atmosphere tables, A320 figures of merit | Lift-curve slope was 54 % below what its own aspect ratio implies, putting clean stall speed at 228 kt instead of ~150 kt |
-| Glass Furnace | Published float-furnace data (4-6 GJ/tonne, 24-30 h residence) | Regenerators were absent entirely, so the energy balance was out by ~2x |
-| Nuclear Reactor | Keepin 1965 delayed-neutron data, the inhour equation, published Xe-135 behaviour | The reactivity budget leaves only 30 pcm of rod margin at full power, which is what gives the xenon pit its teeth |
-| Building HVAC | ISO 13790 5R1C; heavyweight-dwelling time constant and design load | Daily temperature cycle was inverted, coldest at 15:00 |
-| pH Neutralisation | Gustafsson & Waller / Henson & Seborg reaction-invariant benchmark | Nominal design point reproduces pH 7.03, pinning feeds and flows jointly |
-| Binary Distillation | Skogestad "Column A" (41 stages, alpha = 1.5) | Perturbation-derived gain matrix contradicted the mass balance, because the steps had not converged |
-| Wind Turbine | NREL 5 MW reference turbine definition | A Region 2 torque cap made things worse: it only binds *below* rated speed |
-| Grid Battery | Published Li-ion grid-BESS behaviour (round-trip, voltage window, thermal rise) | Sizing caught three errors before coding: 0.05 ohm gives 79 % round-trip, passive cooling implies a 438 K rise, OCV exceeded the 4.2 V ceiling |
-| Boiler Drum | IAPWS steam tables, Astrom & Bell drum geometry, circulation ratio 5-15 | Tracking riser steam as *quality* rather than mass suppressed the swell entirely. Every coefficient was correct, and still no inverse response |
-| Cement Kiln | Published 3.0-3.5 MJ/kg heat consumption, Sullivan residence correlation, 0.5-2 % free lime | An energy audit caught the kiln being fed *raw* meal instead of calcined hot meal, overstating its thermal load by ~50 % |
-| Four Tank | Johansson (2000); RGA, reachability of the target box | The sampled targets sat entirely **above** what the plant can reach, so every episode was unwinnable, and the loops were paired the unstable way round |
-| CSTR | Steady-state multiplicity, branch stability | The 350 K runaway trip sits exactly where the unstable middle steady state does, so termination fires as the reactor ignites |
-| 3D Aircraft | Coordinated-turn relation, load factor | Banked flight reproduces psi_dot = g tan(phi)/V to within 0.5 %, though nothing in the model computes a turn rate |
-
-</details>
+A per-environment summary of what each model is validated against, and an
+example of something that validation caught, is in
+[`docs/PHYSICS_METHODOLOGY.md`](docs/PHYSICS_METHODOLOGY.md#what-each-model-is-checked-against-and-something-it-caught).
 
 **All 21 environments are covered** by fifteen contracts, since the aircraft
 variants share the plant they are built on. On top of that, every environment
@@ -299,25 +254,13 @@ Method and reasoning: [`docs/PHYSICS_METHODOLOGY.md`](docs/PHYSICS_METHODOLOGY.m
 
 ## Performance
 
-Throughput is measured with `python -m target_gym.benchmark_speed`: 256
-environments under `vmap`, stepped 800 deep inside one `jit`-compiled `scan`, on
-CPU, which is how an RL loop actually drives them. Figures scale with batch
-size and are much higher on GPU.
+Fast enough that the environment is not the bottleneck: **0.5 M to 1.7 G
+steps/s on CPU**, vmapped and scanned inside one `jit`, and higher on GPU. The
+spread across the suite is three orders of magnitude, so you can spend a sample
+budget where the dynamics are hard and iterate quickly everywhere else.
 
-| Environment | Steps/s (CPU, vmap 256) | | Environment | Steps/s (CPU, vmap 256) |
-|---|---|---|---|---|
-| First Order System | ~1670 M | | Wind Turbine | ~17.8 M |
-| CSTR | ~111 M | | Building HVAC | ~17.1 M |
-| Four Tank | ~101 M | | Boiler Drum | ~10.0 M |
-| Grid Battery | ~7.5 M | | Glass Furnace | ~3.0 M |
-| pH Neutralisation | ~2.1 M | | Plane 2D | ~1.4 M |
-| Nuclear Reactor | ~1.3 M | | Plane 3D (all) | ~0.9 M |
-| Cement Kiln | ~0.7 M | | Binary Distillation | ~0.5 M |
-| Plane Patrol | ~0.5 M | | | |
-
-The spread is useful: a first-order lag and a distributed kiln are three orders
-of magnitude apart, so you can spend your sample budget where the dynamics are
-actually hard and iterate fast everywhere else.
+Per-environment figures, the method, and how to reproduce them:
+[`docs/performance.md`](docs/performance.md).
 
 ---
 

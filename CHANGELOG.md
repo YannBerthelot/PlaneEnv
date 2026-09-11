@@ -14,9 +14,34 @@ than by commit.
 
 ### Added
 
-- **Seven environments**: building HVAC, pH neutralisation, Skogestad's
+- **Eleven environments**: building HVAC, pH neutralisation, Skogestad's
   distillation Column A, the NREL 5 MW reference wind turbine, a grid battery,
-  a boiler drum, and a cement kiln. Eighteen in total.
+  a boiler drum, and a cement kiln; then four aircraft tasks that move the
+  setpoint instead of holding it, since a tuned PID finishes an altitude hold
+  with 0.0 m of settled error and can no longer tell two controllers apart:
+  `plane_steps` (a staircase), `plane_sine` (a sinusoid, whose amplitude ratio
+  and phase lag are the closed loop's frequency response), `plane_energy`
+  (altitude and airspeed together, which removes the spare actuator), and
+  `plane3d_racetrack` (a holding pattern, which is heading hold and a sustained
+  coordinated turn in one task). Twenty-two in total.
+- **Environment versioning.** `EnvSpec.version` and `spec.versioned_name` give
+  every environment a public identity such as `plane-v1`, stamped in
+  `data/env_versions.json` by `scripts/stamp_env_versions.py`.
+  `tests/test_env_versions.py` fails when an environment's fingerprint moves
+  without its version being bumped, so a published number keeps meaning what it
+  meant. Everything ships as `v1`.
+- **A harness for learned-policy results**: `data/rl_results.json`, written
+  through `target_gym.rl_results.record_result` and guarded by an environment
+  fingerprint deliberately narrower than the one the shipped baselines use, so
+  re-tuning a controller cannot throw away a training run. The experimental
+  design is fixed in advance in `docs/rl-protocol.md`. No results are published
+  yet, and nothing in the suite presumes RL beats a PID.
+- **`docs/target-mdp.md`**, stating the definition the whole suite is built on:
+  the target set, the tracking shape, the admissibility criterion on the target
+  and the feasibility condition on the plant.
+- **A Colab quickstart** (`notebooks/quickstart.ipynb`), linked from the README
+  and the documentation index, and executed by the test suite so it cannot rot.
+- `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1).
 - **A central registry** (`target_gym.registry`) describing every environment,
   its parameters and its baselines, and a **shared conformance suite** that runs
   the same contracts against all of them -- PRNG hygiene, determinism, the
@@ -43,13 +68,112 @@ than by commit.
   (`target_gym.render_kit`), and the README gallery regenerated and extended to
   every environment.
 - **Seven per-environment figure/video runners consolidated** into one
-  registry-driven module, which covers all eighteen environments rather than
+  registry-driven module, which covers all twenty-two environments rather than
   eight.
+- The PyPI development status classifier moves from `3 - Alpha` to
+  `4 - Beta`. Not a promise of an API freeze, which stays deferred; a statement
+  that the surface is settled enough to build against.
 - Python support is 3.11 through 3.14, tested on all four in CI.
 - The test suite runs in parallel; full-suite wall time went from about
   fifteen minutes to under two.
 
 ### Fixed
+
+- **Patrol had no MPC, for a reason that was wrong.** The obstacle on record was
+  that its reference is a manoeuvring lead, so a planner would need the lead's
+  future trajectory as a time-varying parameter. That is true of a CasADi model
+  and irrelevant to a gradient planner: the lead is scripted and deterministic,
+  so differentiating `step_env` propagates it for free. `patrol` now ships a
+  `GradientMPC` leading its PID by 51% at 0.84 of ceiling. `patrol_bearing_only`
+  still has none, and now says why: it withholds the slot error a planner reads,
+  which is the point of the variant.
+- **The patrol PID was missing a term, not mistuned.** Its settled error was
+  exactly linear in the lead's turn rate and exactly symmetric in its sign, 25.9 m
+  per 0.001 rad/step, which is proportional control against a rotating reference.
+  A grid search over the gains had never closed it because no gain could.
+  Feeding the lead's turn rate forward takes the hardest case from 77.8 m to
+  2.4 m against a 60 m tolerance and a 3 m reward precision floor.
+- **The patrol lead never manoeuvred.** It drew one turn rate at reset and held
+  it for the whole episode, which a single feedforward term cancels outright, so
+  the task rewarded no anticipation and its MPC had nothing to plan against. The
+  lead now flies a routed circuit of eight legs, and settled error goes from
+  2.4 m to 8-13 m with turn onsets measurably worse than mid-leg.
+- **Default parameters now match the configuration the baselines are recorded
+  at**, for the eleven environments that do not share a params class with a
+  sibling, and their redundant `test_params` entries are gone. The episode
+  lengths that became defaults are the reasoned ones; the old defaults were not,
+  all nine aircraft having said exactly 10 000.
+- **`requires-python` allowed 3.14, which jaxlib has no wheel for.** A clean
+  `uv sync` resolved CPython 3.14.6 and failed on jaxlib; the test matrix listed
+  3.14 as well, so that job could never have passed. Both stop at 3.13.
+- **The episode-length rule stated a criterion nobody could check.** It asked for
+  `N >= max(10 * tau_actuator, 3 * T_period)` while a later section of the same
+  document recorded relaxing the period clause to one lap, and `tau_actuator`
+  does not exist for two thirds of the suite: nine environments integrate, the
+  aircraft oscillate under a held elevator, and the glass furnace does not settle
+  inside eight thousand steps. The rule now says where it applies and what sets
+  the episode elsewhere.
+
+
+- **The MPC could see the future, once every ten seeds.** `GradientMPC` and
+  `SamplingMPC` roll the real environment forward to score a plan, under a
+  hardcoded `jax.random.PRNGKey(0)`, while `rollout` drives the plant with
+  `PRNGKey(seed)`. On seed 0 those coincide, so the planner's simulated
+  disturbance *was* the plant's actual disturbance and the MPC had perfect
+  foresight. On the battery, whose tracked target is the noise, that was worth
+  350.4 against an honest 151.8: a median tracking error of 22 W where the
+  truth is 60 630 W. It inflated seed 0 of every environment with one of those
+  planners, and with it every published mean. Planners now take a copy of the
+  parameters with the fields named in `EnvSpec.noise_fields` zeroed, so they
+  predict the mean disturbance. That is certainty equivalence, and
+  `docs/baselines.md` had already flagged its absence as a caveat.
+- **`plan_params` and `noise_fields` are inside the fingerprint.**
+  `runners/runners.py` and `registry.py` are in neither `_SHARED_SOURCES` nor
+  an environment's own sources, so a change to either altered every MPC number
+  and invalidated no record. `plan_params` now lives in `experts/mpc.py`, which
+  is fingerprinted, and `baseline_fingerprint` hashes `spec.noise_fields`.
+- **The battery task was measuring the dice, not the controller.** Its dispatch
+  target was an Ornstein-Uhlenbeck process whose one-step innovation had a
+  standard deviation of 63.6 kW against a 150 kW tracking band, which puts the
+  best attainable tracking reward at 0.429. The shipped PID scored 0.447 and
+  the MPC 0.430: both were pinned on an irreducible noise floor and the
+  environment could not tell a good controller from a mediocre one. The signal
+  is now a schedule of twelve 300 s dispatch blocks drawn in ±0.8 MW with 2 kW
+  of regulation jitter, which is what a grid battery is actually handed. The
+  PID goes to 262.0 and the MPC to 265.8, from 160.8 and 174.2.
+
+
+- **The MPC solver could hang, and nothing noticed.** IPOPT was left at its
+  default of 3000 iterations and no time limit, so a single badly conditioned
+  step could run for half an hour while its neighbours took a tenth of a
+  second: nine glass-furnace seeds finished in about three and a half minutes
+  each and the tenth was still going after seventy. `CasadiMPC` now caps
+  iterations at 150 and CPU time as a backstop, the way a controller with a
+  sample period has to. The iteration cap is deterministic, so a baseline
+  recorded on one machine still reproduces on another.
+- **A failed solve was indistinguishable from a converged one.** do-mpc neither
+  raises nor warns when IPOPT gives up: it stores the failed iterate, returns it
+  as the action, and warm-starts the next step from it. An MPC baseline could
+  therefore quietly stop being the upper bound it is presented as. Every record
+  now carries `solver_calls`, `solver_failures`, `solver_capped` and
+  `solver_mean_iters`, and a solve that failed for any reason other than the cap
+  makes the controller hold its previous action and restore its previous warm
+  start instead of planning from the wreckage.
+- **No CasADi MPC declared variable scaling.** IPOPT auto-scales the objective
+  and constraints but not the decision variables. The reactor was handing it a
+  vector spanning `rho_ext` around 0.0016 up to a precursor concentration around
+  377, a factor of 605 000, with hard bounds on the smallest entry of it. Each
+  subclass now declares a `SCALING` table of typical magnitudes.
+- **The four-tank MPC was blind to half a termination condition.** The plant
+  ends the episode when any level reaches `h_min` *or* `h_max`; the controller
+  bounded only `h_min`, and bounded it hard. Both bounds are now present and
+  soft, so the controller can see an overflow coming and a level that touches a
+  bound cannot make the NLP infeasible at `x0`.
+- **Recording lost everything when interrupted.** `scripts/record_baselines.py`
+  wrote its results once, after the loop, so a run that was killed threw away
+  every finished environment. It now checkpoints after each one, and runs
+  environments concurrently rather than one after another, so a slow seed holds
+  a single worker instead of stopping every other environment from starting.
 
 - **Four-tank**: the target range sat entirely above what the plant can reach,
   so every episode was unwinnable. The range, the loop pairing (the RGA puts
@@ -69,8 +193,123 @@ than by commit.
   but the reverse-mode derivative is NaN at zero, which made gradient-based PID
   tuning return NaN gains from a loss that evaluated perfectly well. Forward
   results are unchanged.
+- **Gradient MPC could park an actuator at a limit and never move it again.**
+  These plants saturate, an engine cannot make less than zero thrust, and
+  saturation is written with `clip` or `maximum`, whose derivative at the kink
+  is exactly zero. `GradientMPC._optimize` projected its iterates onto the
+  closed action interval, so any overshooting step put an action exactly on a
+  bound, where its derivative was then zero and gradient descent could never
+  move it again. Measured on `plane_steps`, at the plan where the aircraft gave
+  up: the true one-sided slope in thrust is +3.0 and autodiff returns 0.0, with
+  thrust pinned at -1.000 for 800 steps while the elevator went on being
+  optimised normally. Nothing looks wrong from outside, because a planner that
+  has stopped searching still emits finite, in-bounds actions. Iterates are now
+  held 1e-3 inside the bounds, which is what interior-point solvers do and for
+  this reason. Twelve of the twenty environments with an MPC share it. The
+  four plants among them were re-recorded and moved by under half a point of
+  return, so the defect was latent there and real only on the aircraft.
+- **The aircraft MPC flew the plan into the ground.** With altitude scored and
+  two actuators available, the best plan over a 90 s window is a zoom climb
+  that trades airspeed for altitude faster than the engines can replace it: on
+  `plane_steps` it reached the commanded altitude at t=90 with 30 m/s of
+  airspeed left, departed at 91 degrees angle of attack and hit the ground at
+  t=372. The planner's objective now carries a barrier on airspeed against the
+  stall speed at the current mass and altitude, the pattern
+  `make_wind_turbine_mpc` already used. Fencing angle of attack instead does
+  not work, since it sits at 4-8 degrees throughout the manoeuvre and only
+  crosses 15 degrees one step before the departure. Together with the bound fix
+  above, `plane_steps` goes from terminating early on all ten seeds and scoring
+  656 against the PID's 1593, to flying full episodes and leading the PID on
+  every seed tried.
+- **`plane3d_racetrack` could not be rolled out at all.** The class declared
+  `obs_value_index` and no `obs_target_index`, which `runners.rollout` reads to
+  find the setpoint. The gain search scores candidates inside a `try`, so it
+  reported every one as `-inf` and finished successfully having changed
+  nothing, and no baseline could have been recorded for the environment. The
+  conformance suite now checks both indices across the registry; the tests that
+  covered this named three classes by hand, which is how a fourth got past
+  them.
+- **`plane3d_racetrack` guidance gains**, never previously searched. Settled
+  cross-track error goes from 3.02 km to 0.31 km against an 8.4 km turn radius,
+  and the return from 269.2 to 319.0, so it holds the pattern rather than
+  flying its shape. The roll loop is deliberately held out of the search: left
+  free it stiffens the loop and strips its damping, buying return while taking
+  the achieved bank to 48 degrees against a 30 degree command limit and making
+  the tracking worse. The environment's `expert_degraded` note is gone with it.
+- **`render_mode="human"` raised on every environment whose renderer was
+  rebuilt on the shared toolkit.** Those draw to an image and return no pygame
+  screen, while the Gymnasium wrapper pumped the video system unconditionally,
+  so `render()` failed with "video system not initialized". It now pumps only
+  when a renderer actually opened a window.
+
+- **The glass furnace was missing the two things that make furnace control
+  hard.** It had thermal inertia but no dead time, and a first-order plant with
+  no transport delay has no bandwidth limit, so a PID could be tuned arbitrarily
+  tight against it: one held the crown to 0.078 K mean against a 10 K open-loop
+  drift, roughly thirty times better than a real furnace is held, leaving the
+  task no headroom. Its only load variation was an AR(1) drift on pull at a
+  50 min correlation time, slower than the plant, and a slow smooth load is
+  precisely what integral action cancels perfectly. Now: a 120 s crown
+  thermocouple lag on the observation (the reward still scores the true crown
+  temperature), 60 s of fuel transport delay, discrete batch charging on a 300 s
+  charger cycle with dose-to-dose mass jitter, and the 40 s firing interruption
+  at each reversal that deviation D2 had recorded as missing. Open-loop crown
+  swing went from 10 K to 31 K, and the PID from 99% of the reward ceiling to
+  90%.
+
+- **Setpoint schedules re-derived against what the plants can actually be
+  asked.** The 2D aircraft's staircase was a square wave between two altitudes
+  2.4 km apart; it is now a ladder of eight levels with adjacent changes of 0.2
+  to 0.8 of the amplitude. `plane_sine` commanded a peak climb rate of 20.9 m/s
+  against an aircraft that can sustain 14.6, so the target was unreachable by
+  construction; its amplitude is now 300 m, peaking at 7.9 m/s. The glass
+  furnace's five setpoints were independent draws from a 45 K band, spanning
+  30 K on average against the 10-20 K trim its own comment described; the
+  schedule is now a bounded walk of at most 6 K a step. Every aircraft task and
+  the furnace now start near the level they are commanded, rather than drawing
+  the start independently of the target: the 3D tasks began a median 1.6 km
+  from their assigned altitude, so the episode opened with minutes of open-loop
+  climb.
+
+- **Episode lengths cut where the protocol's own criterion says they are too
+  long.** `plane_energy` ran 104 time constants against a suite that clusters at
+  10 to 15; the path-following tasks ran up to 3.6 laps where one shows whether
+  the path can be flown. Five aircraft episodes shortened, taking the aircraft
+  recording from 12.9 h to about 4.5 h. See `docs/rl-protocol.md`.
+
+- **One renderer for every aircraft panel.** `render_aircraft.py` now holds the
+  palette, the console chrome, the A320 mesh and its projections; the 2D tasks,
+  the 3D tasks and both patrol variants draw with it. `patrol` had been reaching
+  into `plane3d.rendering` for eleven private names, so a palette change in one
+  aircraft environment silently restyled another and nothing said so. Gallery
+  clips are regenerated for both the PID and the MPC, all at 10 fps and about
+  ten seconds.
 
 ### Removed
+
+- **`plane_steps`**, absorbed into `plane_energy`. They were the same
+  environment: same plant, same setpoint schedule, same disturbances, same
+  episode length, differing only in `speed_weight` being 0.0 rather than 0.5.
+  Two registered environments for one reward coefficient is not two tasks, and
+  the pair cost 9 h of the 12.9 h it took to record the aircraft. The pure
+  altitude staircase is still reachable as `PlaneParams(speed_weight=0.0)`.
+
+- **Running-cost terms from seven rewards**, for this release line: fuel on the
+  glass furnace, the boiler drum and the cement kiln, energy on the building,
+  reboiler duty on the column, and reagent on the pH loop. All six weights are
+  zero and those tasks score setpoint tracking alone.
+
+  The battery was briefly in this list by mistake. Its `cost_weight` is not a
+  consumption cost: it gates the degradation and state-of-charge terms, which
+  are what keep that control problem well posed, and zeroing it made the
+  optimal policy follow dispatch until the pack hit a limit. Restored, and the
+  field now says what it is. Cost is real, but its weight against tracking accuracy silently picks a
+  point on a Pareto front, and none of the seven had an argument behind its
+  number. The glass furnace showed what that costs: a 0.1 fuel weight made a
+  3.3 K standing error the optimum of what its MPC was asked to minimise, so the
+  controller sat 6 K cold with fuel at minimum 80% of the time and lost to its
+  own PID. The fields and the terms are still wired, so a weight can be restored
+  once there is a defensible way to set one.
 
 - Dead modules carrying no importers: `experts/degradation.py`,
   `experts/cpg.py` and `experts/pd.py` (the latter two were Brax/MuJoCo
@@ -83,11 +322,14 @@ than by commit.
 - Both patrol variants ship a PID, but it holds formation only loosely --
   roughly 139 m of settled slot error against a 60 m tolerance, pinned by six
   `strict` xfail cases.
-- Three of the seven gradient PID tuners (`plane`, `plane3d_heading`,
-  `plane3d_circle`) return NaN gains, pinned by `strict` xfails. Relay
-  autotuning, which produced the shipped gains, is unaffected.
+- ~~Two of the seven gradient PID tuners return NaN gains.~~ **Resolved**, and
+  the cause turned out to be one line. `plane.dynamics.aero_coefficients` wrote
+  its stall blend as `CL_linear / (1 + exp(u))`; past about 77 degrees of
+  incidence the exponent overflows float32, `exp` returns `inf`, and the
+  reverse-mode derivative of `x / (1 + inf)` is NaN even though the forward value
+  is a perfectly good 0. Any rollout long enough for the aircraft to depart
+  reached that incidence, so every gradient through it came back NaN. Written as
+  `jax.nn.sigmoid`, the same function evaluated stably, all seven tuners pass.
 - No published RL baseline results yet.
-- The tested configuration pins `gymnax` to upstream `main`, so it cannot be
-  reproduced from PyPI alone.
 
 [Unreleased]: https://github.com/YannBerthelot/TargetGym/compare/0.5.0...HEAD

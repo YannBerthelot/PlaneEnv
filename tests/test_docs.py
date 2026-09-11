@@ -39,7 +39,7 @@ def _runnable_blocks(path: pathlib.Path) -> list[str]:
 
 def _doc_cases() -> list[tuple[str, str]]:
     cases = []
-    for md in sorted(DOCS.glob("*.md")):
+    for md in [ROOT / "README.md", *sorted(DOCS.glob("*.md"))]:
         for i, code in enumerate(_runnable_blocks(md)):
             cases.append(pytest.param(code, id=f"{md.name}:{i}"))
     return cases
@@ -61,7 +61,13 @@ def test_environment_reference_is_in_sync_with_the_registry():
 
 @pytest.mark.parametrize("code", _doc_cases())
 def test_documented_example_runs(code, tmp_path, monkeypatch):
-    """Every runnable example in docs/ executes without raising."""
+    """Every runnable example in the README and docs/ executes without raising.
+
+    The README is included because it is the highest-traffic surface in the
+    project and its quickstart is the first code anyone runs. The first version
+    of that quickstart imported a name the package does not export, and nothing
+    would have caught it -- this test globbed ``docs/`` only.
+    """
     monkeypatch.chdir(tmp_path)
     exec(compile(code, "<doc>", "exec"), {"__name__": "__doc_example__"})
 
@@ -120,3 +126,64 @@ def test_readme_states_the_right_number_of_physics_contracts():
         f"README says {word} ({_NUMBER_WORDS[word]}) contracts, "
         f"but there are {actual} PHYSICS.md files"
     )
+
+
+def test_the_colab_notebook_still_runs():
+    """Execute the quickstart notebook's code cells.
+
+    The notebook is the first thing a new user runs, and it is the example most
+    likely to rot silently: it lives outside `docs/`, so the fenced-block runner
+    above never sees it, and nobody notices a broken cell until a reader hits
+    it. This session alone changed the plane's observation width and moved the
+    quickstart from `step_env` to `step`, either of which would have broken it.
+
+    The install cell is skipped, since the package under test is the one already
+    importable here.
+    """
+    import json
+
+    nb = json.loads((ROOT / "notebooks" / "quickstart.ipynb").read_text())
+    sources = [
+        "".join(cell["source"]) for cell in nb["cells"] if cell["cell_type"] == "code"
+    ]
+    body = [src for src in sources if not src.lstrip().startswith("!pip")]
+    assert body, "no runnable cells found in the notebook"
+
+    import matplotlib
+
+    matplotlib.use("Agg")
+    namespace: dict = {"__name__": "__notebook__"}
+    for i, src in enumerate(body):
+        try:
+            exec(compile(src, f"<notebook cell {i}>", "exec"), namespace)
+        except Exception as exc:  # pragma: no cover - the failure is the point
+            raise AssertionError(
+                f"notebooks/quickstart.ipynb cell {i} failed: {exc}\n\n{src}"
+            ) from exc
+
+
+def test_documentation_still_describes_the_code():
+    """The contracts are read *instead of* the code, so drift misinforms.
+
+    Reviewing all twenty-one environments found this to be the repository's
+    most common defect, and three of that review's own findings were wrong
+    because of it: a deviation claiming post-stall lift decays to zero when the
+    fix had long been implemented, a docstring saying sub-step rewards are
+    summed when the code takes their mean, and a deviation crediting a reward
+    change to a band the reward does not read.
+
+    ``scripts/check_doc_drift.py`` catches the four mechanical cases. The
+    judgement calls it cannot catch are exactly the ones that rot, so this is a
+    floor rather than a guarantee.
+    """
+    import subprocess
+    import sys
+
+    for script in ("scripts/generate_physics_facts.py", "scripts/check_doc_drift.py"):
+        result = subprocess.run(
+            [sys.executable, script, "--check"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, script + "\n" + result.stdout + result.stderr

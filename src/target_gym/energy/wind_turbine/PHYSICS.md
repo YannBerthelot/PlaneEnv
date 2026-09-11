@@ -133,3 +133,24 @@ selection. Achievable bandwidth here is therefore optimistic.
 **⚠️ D3 — uniform inflow.** One rotor-effective wind speed, no shear, veer,
 tower shadow or turbulence structure across the disc, so there is no 1P/3P
 loading and individual pitch control has nothing to act on.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `wind_turbine` | 400 | 0.25 | 100 s | 2 in [-1, 1] | 5 | 8 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

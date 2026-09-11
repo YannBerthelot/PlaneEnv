@@ -98,8 +98,10 @@ eigenvalue is `|λ| ≈ (L+V)/M ≈ 11.8 min⁻¹`. RK4 is stable only for
 | **16** | **0.74** | yD = 0.99000, xB = 0.01001 ✅ |
 
 The reference implementations use adaptive implicit solvers, which hides this.
-It costs throughput: **≈ 0.65 M steps/s**, the slowest environment in the
-library — 41 states × 64 RHS evaluations per step. The fast modes are
+It costs throughput -- 41 states by 64 RHS evaluations per step makes this one
+of the two or three most expensive environments here, and which one is *the*
+most expensive depends on the batch size, so see
+[docs/performance.md](../../../docs/performance.md) rather than a claim here. The fast modes are
 individual tray holdups (~10 s residence) while the profile of interest evolves
 over ~194 min, so this is stiffness, and an implicit integrator would be the
 way to buy it back.
@@ -155,3 +157,24 @@ ill-conditioned materially changes achievable performance.
 
 **⚠️ D3 — constant molar flows.** Standard for this benchmark, but it means
 energy balance effects (varying latent heats, subcooling) cannot appear.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `distillation` | 200 | 1 | 3 min | 2 in [-1, 1] | 6 | 46 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

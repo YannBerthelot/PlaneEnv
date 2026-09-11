@@ -296,6 +296,10 @@ class Plane3DPIDState:
     # Separate integrator for the power loop (heading task MIMO altitude control)
     power_integral: float
     power_prev: float
+    # Previous lead heading, for the patrol follower's turn-rate feedforward.
+    # Unused by the other variants, and defaulted so their constructors are
+    # untouched.
+    lead_psi_prev: float = 0.0
 
 
 @struct.dataclass
@@ -581,6 +585,17 @@ class PatrolPIDParams:
     Kd_bank: float  # roll-rate (phi_dot) damping — kills the bank wobble
     max_bank_rad: float
     blend_dist: float  # in-plane distance (m) over which to blend to lead heading
+    #: Fraction of the lead's estimated turn rate fed forward. 1.0 is the
+    #: physically right value: in a steady turn the follower has to turn at the
+    #: lead's rate whatever its position error happens to be. Exposed as a gain
+    #: only so it can be swept, and so a tuner can back it off if the estimate
+    #: ever gets noisy.
+    Kff_lead: float
+    #: Clamp on the estimated lead turn rate (rad/s). The estimate is a
+    #: one-step difference of the lead heading, and on the very first call
+    #: there is no previous sample, so it is bounded to something the lead can
+    #: physically fly rather than special-cased.
+    lead_rate_max: float
     dt: float
 
 
@@ -680,7 +695,26 @@ def patrol_pid_step(
         + params.Ki_hdg * new_hdg_int
         + params.Kd_hdg * hdg_d
     )
-    turn_rate_cmd = _G * bank_cmd / _PATROL_NOMINAL_SPEED
+    # Feedforward the lead's turn.
+    #
+    # Without this the loop is proportional control against a rotating
+    # reference, and it settles exactly where the position error generates the
+    # bank the turn needs. Measured, that offset is precisely linear in the
+    # lead's turn rate and symmetric in its sign: 2.1 m straight and level,
+    # 25.9 m at 0.001 rad/step, 51.8 m at 0.002, 77.8 m at 0.003, against a
+    # 60 m tolerance. It is not a mistuning -- a grid search over these gains
+    # never closed it, which was once read as the guidance law needing rework
+    # -- it is a missing term. Close to the slot the law blends onto "fly
+    # parallel", which sets the follower's heading and never commands the rate
+    # the turn requires.
+    #
+    # The lead's turn rate is not observed, but its heading is, as
+    # ``psi + rel_heading``, so one step of difference recovers it exactly.
+    # (With measurement noise, a roadmap item, this needs a filter.)
+    psi_lead_now = _wrap_angle(psi_lead)
+    lead_rate = _wrap_angle(psi_lead_now - state.lead_psi_prev) / params.dt
+    lead_rate = jnp.clip(lead_rate, -params.lead_rate_max, params.lead_rate_max)
+    turn_rate_cmd = params.Kff_lead * lead_rate + _G * bank_cmd / _PATROL_NOMINAL_SPEED
     turn_rate_max = _G * jnp.tan(params.max_bank_rad) / speed
     turn_rate_cmd = jnp.clip(turn_rate_cmd, -turn_rate_max, turn_rate_max)
     desired_bank = jnp.arctan(speed * turn_rate_cmd / _G)
@@ -695,6 +729,7 @@ def patrol_pid_step(
         track_prev=heading_err,
         power_integral=new_power_int,
         power_prev=e_back,
+        lead_psi_prev=psi_lead_now,
     )
     return jnp.array([power, stick, aileron]), new_state
 
@@ -726,6 +761,8 @@ def make_patrol_pid() -> tuple[PatrolPIDParams, Plane3DPIDState]:
         Kd_bank=float(_p.get("Kd_bank", 3.124)),
         max_bank_rad=float(np.deg2rad(30.0)),
         blend_dist=float(_p.get("blend_dist", 500.0)),
+        Kff_lead=float(_p.get("Kff_lead", 1.0)),
+        lead_rate_max=float(_p.get("lead_rate_max", 0.005)),
         dt=1.0,
     )
     return params, plane3d_pid_reset(params)
@@ -2522,6 +2559,87 @@ class _HeadingLateral:
 _TURN_BANK_MARGIN = 0.85
 
 
+class _RacetrackLateral:
+    """Follow a holding pattern: exact tangent, plus a cross-track correction.
+
+    The figure-8's law blends a *bearing to the nearest curve point* with the
+    tangent, and beyond a few percent of the lobe radius the bearing wins --
+    which is pure pursuit, and pure pursuit lags a curved path by construction.
+    That environment still misses its curve by kilometres.
+
+    Here the tangent and the signed cross-track error are both closed form, so
+    the law can be the textbook one instead: steer to the tangent, and add a
+    correction proportional to how far off the path the aircraft is, limited so
+    a large error cannot demand more than a right angle of intercept.
+    """
+
+    def __init__(
+        self,
+        Kp_track,
+        Ki_track,
+        Kd_track,
+        Kp_bank,
+        # Negative, unlike the heading and circle channels. With Kp_bank
+        # negative the aileron is proportional to (desired - phi), so a
+        # *positive* rate term is positive feedback on roll: measured, it let
+        # bank reach 52 degrees against a 30 degree command limit. At -1.5 the
+        # same run peaks at 35.
+        Kd_bank=-1.5,
+        max_bank_rad=np.deg2rad(30.0),
+        max_intercept_rad=np.deg2rad(45.0),
+        gravity=9.81,
+        dt=1.0,
+    ):
+        self.Kp_track, self.Ki_track, self.Kd_track = Kp_track, Ki_track, Kd_track
+        self.Kp_bank, self.Kd_bank = Kp_bank, Kd_bank
+        self.max_bank_rad = float(max_bank_rad)
+        self.max_intercept_rad = float(max_intercept_rad)
+        self.gravity, self.dt = gravity, dt
+        self._hdg_gain = 1.0
+        self.reset()
+
+    def reset(self):
+        self._int = 0.0
+        self._prev = 0.0
+
+    def speed_limit(self, obs):
+        """Fastest speed the turn radius admits, with bank in hand."""
+        radius = np.maximum(obs[..., 13], 1.0)
+        usable = _TURN_BANK_MARGIN * self.max_bank_rad
+        return np.sqrt(self.gravity * radius * np.tan(usable))
+
+    def __call__(self, obs, phi, phi_dot):
+        cross, tangent, curvature = obs[..., 18], obs[..., 19], obs[..., 20]
+        self._int = self._int + cross * self.dt
+        deriv = (cross - self._prev) / self.dt
+        self._prev = cross
+
+        intercept = np.clip(
+            self.Kp_track * cross + self.Ki_track * self._int + self.Kd_track * deriv,
+            -self.max_intercept_rad,
+            self.max_intercept_rad,
+        )
+        desired_heading = tangent - intercept
+        err = _wrap_angle_np(desired_heading - obs[..., 9])
+
+        # Coordinated-turn feedforward: the bank that flies this curvature at
+        # this speed, tan(phi) = v^2 * kappa / g. Steering to the tangent alone
+        # lags a curved path however good the gains, which is what put the
+        # aircraft 4 km outside the turns before this existed.
+        speed_sq = obs[..., 0] ** 2 + obs[..., 1] ** 2 + 1e-6
+        ideal_bank = np.arctan(speed_sq * curvature / self.gravity)
+        desired_bank = np.clip(
+            ideal_bank + self._hdg_gain * err, -self.max_bank_rad, self.max_bank_rad
+        )
+        aileron = np.clip(
+            self.Kp_bank * (phi - desired_bank) + self.Kd_bank * phi_dot, -1.0, 1.0
+        )
+        self._int = np.where(
+            np.abs(aileron) >= 1.0, self._int - cross * self.dt, self._int
+        )
+        return aileron
+
+
 class _CircleLateral:
     """Coordinated-turn feedforward plus a radial-error correction.
 
@@ -3359,4 +3477,24 @@ def make_battery_stateful_pid() -> StatefulBatteryPID:
         Kp=float(_p.get("Kp", 0.5)),
         Ki=float(_p.get("Ki", 0.02)),
         guard_margin=float(_p.get("guard_margin", 0.12)),
+    )
+
+
+def make_plane3d_racetrack_cascaded_pid() -> StatefulCascadedPlane3DPID:
+    """Holding-pattern autopilot: shared vertical and airspeed, racetrack lateral."""
+    return StatefulCascadedPlane3DPID(
+        lateral=_RacetrackLateral(
+            Kp_track=_g3d("racetrack", "track", "Kp", 6e-4),
+            Ki_track=_g3d("racetrack", "track", "Ki", 0.0),
+            Kd_track=_g3d("racetrack", "track", "Kd", 0.0),
+            Kp_bank=_g3d("racetrack", "bank", "Kp", -2.0),
+            # Tunable, not fixed, because it cannot be chosen independently of
+            # Kp_bank: roll damping is what stops the loop overshooting its own
+            # bank command, and how much is needed scales with how stiff the
+            # loop is. Left out of the gains file, a search that stiffened
+            # Kp_bank 2.8x took the achieved bank to 50 deg against a 30 deg
+            # command, which is the defect this class's docstring was written
+            # about.
+            Kd_bank=_g3d("racetrack", "bank", "Kd", -1.5),
+        )
     )

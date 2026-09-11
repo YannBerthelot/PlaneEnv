@@ -252,7 +252,15 @@ def aero_coefficients(aoa_deg, mach, params):
     # separate over well under a degree, which no wing does. The 10-90 % band
     # this gives is 2.9 deg, in the 2-5 deg a clean transport wing shows.
     stall_sharpness = jnp.log(99.0) / params.aoa_stall_width
-    CL = CL_linear / (1 + jnp.exp((aoa_deg - stall_centre) * stall_sharpness))
+    # ``jax.nn.sigmoid`` rather than ``1 / (1 + exp(u))``, which is the same
+    # function written so it survives float32. A departed aircraft reaches
+    # incidences of 80 deg and beyond, and there ``exp(u)`` overflows: at 90 deg
+    # the exponent is 110, ``exp`` returns inf, and while the forward value is
+    # still a perfectly good 0, the reverse-mode derivative of ``x / (1 + inf)``
+    # is NaN. That poisoned every gradient in any rollout long enough to depart,
+    # which is what made ``tune_plane_pid`` return NaN gains and pinned two of
+    # the 3D aircraft tuners as expected failures.
+    CL = CL_linear * jax.nn.sigmoid(-(aoa_deg - stall_centre) * stall_sharpness)
     # Positive and negative stall limits. A cambered transport wing stalls
     # asymmetrically: CL_max ~ +1.5 near +15 deg, CL_min ~ -1.0 near -10 deg.
     # Only the positive limit existed before; with the corrected (steeper)

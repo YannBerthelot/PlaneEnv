@@ -521,7 +521,7 @@ def tune_plane_pid(
 
             def step_fn(carry, _):
                 env_state, pid_state = carry
-                obs = env.get_obs(env_state)
+                obs = env.get_obs(env_state, params)
                 action, new_pid_state = mimo_pid_step(mimo_params, pid_state, obs)
                 _, new_env_state, _, _, _ = env.step_env(key, env_state, action, params)
                 error = obs[tgt_idx] - obs[z_idx]

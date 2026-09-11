@@ -171,7 +171,19 @@ plane/wandb_extraction.py
 # force-adding past a blanket ignore.
 videos/**/*.mp4
 videos/**/*.gif
-!videos/**/*_short.gif
+# No exception for *_short.gif any more.
+#
+# The committed set is exactly what a published page embeds: the five gallery
+# mosaics, which the README and the environment index carry. Everything else --
+# the per-environment clips and the shorts the mosaics are built from -- is
+# rendered by the docs-deploy workflow before it builds the site, so the
+# repository does not carry tens of megabytes of regenerable media.
+#
+# The shorts were the exception because they were once what the environment
+# pages embedded. They are not: ``scripts/generate_env_pages.py`` deliberately
+# references ``pid_output.gif``, and keeping the shorts committed meant the
+# repository carried 55 MB that nothing published referenced while the files
+# the pages *did* reference were absent from a clean checkout.
 .DS_Store
 models
 

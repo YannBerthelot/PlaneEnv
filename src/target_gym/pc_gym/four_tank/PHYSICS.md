@@ -106,17 +106,35 @@ independent and diagonal will destabilise itself.
 measured, so unlike most of this suite the plant is fully observed. The
 difficulty is structural, not informational.
 
-**Reward** — mean of two squared normalised tracking bands.
+**Reward** — mean of two `log_scaled_reward` terms, one per controlled level,
+against the `h_max − h_min` span with a floor at `precision_floor = 1e-3` m, a
+millimetre, which is what a level transmitter resolves.
 
 ---
 
 ## 5. Known deviations
 
 **⚠️ D1 — the reward band was three times the operating range.** It was
-originally normalised by the full tank span (`h_max − h_min` = 1.45 m), so a
-half-metre miss still scored 0.43 and a saturated controller looked much like a
-working one. Now an explicit 0.05 m band. Recorded because it is *why* a much
-worse defect went unnoticed: the target range once sat entirely above the
+originally normalised by the full tank span (`h_max − h_min` = 1.45 m) *and
+squared*, so a half-metre miss still scored 0.43 and a saturated controller
+looked much like a working one.
+
+Fixed by log scaling rather than by narrowing the span: the same half-metre miss
+now scores 0.15, and every halving of the error is worth the same increment down
+to the millimetre the transmitter resolves. The span is still the full 1.45 m,
+which under a log is only the denominator and no longer flattens anything.
+
+`tracking_band = 0.05` is left over from the narrowing that was tried first. It
+is **a controller constant, not a reward parameter**: nothing in this file's
+reward reads it, and the only consumer is the MPC objective in `experts/mpc.py`,
+which normalises its tracking error by it. That is the same shape as the glass
+furnace's since-removed `tracking_scale`, which the reward had stopped using while the
+controller went on steering by it, and which cost that environment 16% against
+its own PID. It is harmless here, because this objective has no competing cost
+term for a mis-scaled tracking term to be flat against, so the band affects only
+conditioning. It is named here so it does not look like the furnace's did.
+
+Recorded because it is *why* a much worse defect went unnoticed: the target range once sat entirely above the
 reachable envelope — no sampled setpoint was attainable and every episode was
 unwinnable — and neither the reward nor the shared effectiveness contract
 registered it.
@@ -136,3 +154,24 @@ distinctive property.
 **⚠️ D4 — no disturbance and no measurement noise.** Deterministic given the
 sampled setpoint and initial condition, which is why the conformance suite
 skips its PRNG-hygiene checks.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `four_tank` | 500 | 1 | 8 min | 2 in [-1, 1] | 6 | 8 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

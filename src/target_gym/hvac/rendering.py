@@ -246,4 +246,4 @@ def render_hvac(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_hvac, HISTORY_KEYS, stride=4)
+_render = rk.make_render_hook(render_hvac, HISTORY_KEYS)

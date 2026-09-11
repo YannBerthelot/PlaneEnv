@@ -119,7 +119,10 @@ range buys 0.078 mol/L of concentration — a narrow, nonlinear authority.
 composition analyser. Nothing is hidden here, which makes this one of the two
 fully-observed environments in the suite.
 
-**Reward** — a squared normalised tracking band on `Ca`.
+**Reward** — `log_scaled_reward` on `Ca` against the 0.3 mol/L envelope, with a
+floor at `precision_floor = 1e-4` mol/L, the resolution of an online analyser.
+It replaced a squared normalised band, which divided the error by the whole
+envelope and was nearly flat over any error a working controller produces.
 
 **No disturbance.** Unusually for this suite, the CSTR is deterministic apart
 from the sampled setpoint. That is inherited from PC-gym and is why the shared
@@ -145,8 +148,36 @@ all of which matter for a reactor whose failure mode is thermal runaway.
 so the only variation across episodes is the sampled setpoint and initial
 condition. The environment is effectively deterministic.
 
+**D1 and D3 are only tolerable together.** A controller asked for the bottom of
+the target band sits within 0.2 K of its coolant stop, which is to say it has
+spent its authority. That goes unnoticed only because nothing perturbs it. If a
+feed disturbance is ever added, as D3 contemplates, the bottom of the band stops
+being merely tight and becomes uncontrollable, and `target_CA_range` has to be
+narrowed at the same time.
+
 **⚠️ D4 — the ignited branch is unreachable by construction.** The 350 K
 termination fires before the reactor can settle on its high-conversion steady
 state, so the multiplicity is present in the model but only one branch is ever
 visited. The trip is the *point* — runaway is the irrecoverable state — but it
 means the environment does not exercise the reactor's full behaviour.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `cstr` | 100 | 0.25 | 25 s | 1 in [-1, 1] | 3 | 4 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

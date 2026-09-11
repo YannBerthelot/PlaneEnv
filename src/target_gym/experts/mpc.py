@@ -53,6 +53,30 @@ except ImportError:
 # ============================================================================
 
 
+def plan_params(spec, params):
+    """The params a planner should use for its own internal model.
+
+    Identical to *params* except that anything named in ``spec.noise_fields``
+    is zeroed, so the planner predicts the **mean** disturbance rather than one
+    invented realisation of it. That is certainty equivalence, and it is the
+    standard treatment for additive zero-mean noise.
+
+    Without it the planners rolled the true environment forward under a
+    hardcoded ``jax.random.PRNGKey(0)`` while ``rollout`` drives the plant with
+    ``PRNGKey(seed)``. On **seed 0 those coincide**, so the planner's simulated
+    disturbance was the plant's actual disturbance and the MPC had perfect
+    foresight for one seed in ten. On the battery, whose tracked target *was*
+    the noise, that was worth 350.4 against 151.8: a median tracking error of
+    22 W where the honest figure is 60 630 W. It inflated seed 0 of every
+    environment with a gradient or sampling planner, and it inflated the
+    published mean of all of them.
+    """
+    fields = getattr(spec, "noise_fields", ())
+    if not fields:
+        return params
+    return params.replace(**{f: 0.0 for f in fields})
+
+
 class GradientMPC:
     """
     Single-shooting gradient MPC controller.
@@ -132,6 +156,11 @@ class GradientMPC:
         self.objective_fn = objective_fn
 
         self._actions = jnp.zeros((horizon, action_dim))
+        # One jitted entry point, deliberately. A second one for a larger
+        # first-solve budget was tried and removed: the batched path never
+        # called it, and two jitted functions with the same body compile
+        # twice -- about 50 s each for the patrol planner, paid once per
+        # process on the per-seed route.
         self._jit_optimize = jax.jit(self._optimize)
 
     def _env_action(self, u: jnp.ndarray):
@@ -164,9 +193,64 @@ class GradientMPC:
             total = total + jnp.sum(tail_rewards)
         return total
 
-    def _optimize(self, actions_init: jnp.ndarray, state) -> jnp.ndarray:
+    # Iterates are held this far inside the action bounds, as a fraction of the
+    # half-range. See ``_optimize`` for why sitting exactly on a bound is fatal.
+    _BOUND_MARGIN = 1e-3
+
+    def _descend(self, actions_init: jnp.ndarray, state, n_iter: int) -> jnp.ndarray:
+        """Projected gradient descent, kept strictly inside the action bounds.
+
+        The margin is the whole point, and it is not cosmetic. These plants
+        saturate: an engine cannot produce less than zero thrust, a valve
+        cannot open past fully open. Saturation is written with ``clip`` or
+        ``maximum``, and at exactly the kink those hand back a derivative of
+        zero, which is a valid subgradient and the wrong one for an optimiser.
+        Projecting onto the closed interval parks an action precisely on the
+        bound whenever a step overshoots, and the bound is then *absorbing*:
+        the derivative there is exactly zero, so gradient descent can never
+        move that action again, however it is scaled or preconditioned.
+
+        Measured on ``plane_steps`` seed 2, at the plan where the aircraft
+        gives up and glides into the ground with the setpoint 2000 m above it::
+
+            thrust  autodiff d(obj)/d(thrust)   finite difference   objective
+            -1.00           0.0000                   +2.998           23.989
+            -0.99          +2.9998                   +3.003           24.019
+            -0.95          +3.0266                   +3.030           24.140
+            -0.50          +3.5376                   +3.545           25.597
+
+        The derivative is right everywhere except on the bound, where the true
+        one-sided slope is +3.0 and autodiff returns 0. Thrust sat at exactly
+        -1.000 for 800 steps while the elevator went on being optimised
+        normally, which is why the controller looked alive the whole time: a
+        planner that has stopped searching still emits finite, in-bounds
+        actions. Holding the iterates 1e-3 inside the bounds takes the episode
+        from terminating at t=1732 to flying all 2400 steps, and the return
+        from 1013.6 to 2109.9 against the PID's 1717.6.
+
+        This is the interior-point principle in miniature, and it is the reason
+        real NLP solvers keep their iterates off the bounds. Two alternatives
+        were measured and are worse. Normalising the gradient per actuator
+        rather than over the whole sequence crashes earlier, at t=971, because
+        it lets a noisy actuator take a full-size step every iteration. A
+        finite-difference line search over a constant offset per actuator does
+        work, since it never consults the derivative, but it scores below this
+        on both seeds tried and costs ``action_dim * 7`` extra rollouts a step.
+
+        Twelve of the twenty environments with an MPC use this optimiser. The
+        four plants among them (battery, boiler drum, distillation, wind
+        turbine) were re-recorded after the change and moved by under half a
+        point of return, distillation not at all, so the defect was latent for
+        them and real only for the aircraft.
+
+        The NaN scrub below is a second instance of the same family, and is
+        left as it is: this project has a documented, unlocalised reverse-mode
+        NaN in the aircraft dynamics (see ``NAN_TUNERS`` in
+        ``tests/experts/test_pid_tuning.py``).
+        """
         cost_grad = jax.grad(lambda a: -self._rollout(a, state))
-        lb, ub, lr = self.action_lb, self.action_ub, self.lr
+        margin = self._BOUND_MARGIN * 0.5 * (self.action_ub - self.action_lb)
+        lb, ub, lr = self.action_lb + margin, self.action_ub - margin, self.lr
 
         def body(_, actions):
             g = cost_grad(actions)
@@ -178,7 +262,22 @@ class GradientMPC:
             g = jnp.where(g_norm > 1.0, g / g_norm, g)
             return jnp.clip(actions - lr * g, lb, ub)
 
-        return jax.lax.fori_loop(0, self.n_iter, body, actions_init)
+        return jax.lax.fori_loop(0, n_iter, body, jnp.clip(actions_init, lb, ub))
+
+    def _optimize(self, actions_init: jnp.ndarray, state) -> jnp.ndarray:
+        """Refine a warm-started plan. Two arguments, so it vmaps as it stands."""
+        return self._descend(actions_init, state, self.n_iter)
+
+    def solver_report(self) -> dict:
+        """No external solver, so no convergence to report.
+
+        Part of the planner interface rather than a special case at the call
+        site: the recorder asks every controller for its solver health, and a
+        planner that has none should say so rather than raise. Leaving it off
+        cost a 44-minute record that crashed on the one sampling planner in the
+        suite after every other environment had already finished.
+        """
+        return {}
 
     def step(self, _obs, state):
         """Return next action. ``_obs`` is ignored (kept for API symmetry)."""
@@ -197,6 +296,28 @@ class GradientMPC:
 # ============================================================================
 # CasADi MPC  — IPOPT-based, used for CSTR / FirstOrder / Nonsmooth / FourTank
 # ============================================================================
+
+
+# IPOPT defaults to 3000 iterations and no time limit. In a receding-horizon
+# loop that is not a safety net, it is a hang: one badly conditioned step can
+# run for half an hour while its neighbours take a tenth of a second, and the
+# episode never finishes. A real MPC has a sample period and returns the best
+# iterate it holds when the clock runs out, so ours does the same.
+#
+# The iteration cap is the one meant to bind. It is deterministic, so a
+# baseline recorded on one machine reproduces on another -- which a wall-clock
+# cap would not be, since a slower machine would record a different return.
+# ``max_cpu_time`` is only a backstop against a solve that is pathological
+# rather than merely hard, and sits far above anything a healthy step needs.
+IPOPT_MAX_ITER = 150
+IPOPT_MAX_CPU_TIME = 60.0
+
+# IPOPT return codes that mean "I stopped because you told me to", as opposed
+# to a genuine numerical failure. Both count as non-convergence; separating
+# them says whether the cap is doing the work or the problem is broken.
+_IPOPT_CAP_STATUSES = frozenset(
+    {"Maximum_Iterations_Exceeded", "Maximum_CpuTime_Exceeded"}
+)
 
 
 class CasadiMPC:
@@ -226,6 +347,15 @@ class CasadiMPC:
         # the env's delta_t to give a meaningful planning horizon).
         self.mpc_dt = float(mpc_dt) if mpc_dt is not None else float(params.delta_t)
         self._initialized = False
+        # Solver health, accumulated over every solve this controller performs.
+        # ``reset`` deliberately leaves these alone so one counter covers a
+        # whole rollout rather than the last episode of it.
+        self.solve_calls = 0
+        self.solve_iters = 0
+        self.solve_failures = 0
+        self.solve_capped = 0
+        self.last_return_status = ""
+        self._last_u = None
         self._mpc = self._build_mpc()
 
     # ------------------------------------------------------------------
@@ -253,13 +383,18 @@ class CasadiMPC:
             self._mpc.x0 = x0
             self._mpc.set_initial_guess()
             self._initialized = True
+        guess = self._save_guess()
         u = np.array(self._mpc.make_step(x0)).flatten()
+        if not self._record_solve():
+            u = self._fallback(guess, u)
+        self._last_u = u
         u_clipped = np.clip(u, -1.0, 1.0)
         return float(u_clipped[0]) if len(u_clipped) == 1 else u_clipped
 
     def reset(self):
         """Reset so that the next step re-initialises the warm-start."""
         self._initialized = False
+        self._last_u = None
 
     # ------------------------------------------------------------------
     # Shared do_mpc boilerplate
@@ -267,7 +402,109 @@ class CasadiMPC:
 
     @staticmethod
     def _quiet_ipopt():
-        return {"ipopt.print_level": 0, "print_time": 0, "ipopt.sb": "yes"}
+        return {
+            "ipopt.print_level": 0,
+            "print_time": 0,
+            "ipopt.sb": "yes",
+            "ipopt.max_iter": IPOPT_MAX_ITER,
+            "ipopt.max_cpu_time": IPOPT_MAX_CPU_TIME,
+        }
+
+    # ------------------------------------------------------------------
+    # Conditioning
+    # ------------------------------------------------------------------
+
+    #: Typical magnitude of each optimisation variable, by do-mpc kind.
+    #: Subclasses override; anything not named is left at 1.0.
+    SCALING: dict = {}
+
+    def _apply_scaling(self, mpc) -> None:
+        """Tell the solver what a unit is, before ``setup`` freezes the NLP.
+
+        IPOPT auto-scales the objective and the constraints, but not the
+        decision variables: step norms, bound handling and the warm start all
+        run in whatever units the model happens to use. Left alone, the reactor
+        hands it a vector spanning ``rho_ext`` around 0.0016 up to a precursor
+        concentration around 377 -- a factor of 605 000, measured over a PID
+        episode -- and puts hard bounds on the smallest entry of it. That is a
+        badly conditioned KKT system built out of nothing but unit choices, and
+        it shows up as iteration counts, which is what makes a seed take twenty
+        times its siblings.
+
+        The numbers below are means of ``|x|`` over a PID episode, rounded to
+        one figure. They only have to be the right order of magnitude.
+        """
+        for kind, entries in self.SCALING.items():
+            for var, value in entries.items():
+                mpc.scaling[kind, var] = float(value)
+
+    # ------------------------------------------------------------------
+    # Solver health
+    # ------------------------------------------------------------------
+
+    def _record_solve(self) -> bool:
+        """Fold the last solve's outcome into the running counters.
+
+        do-mpc neither raises nor warns when IPOPT gives up: it stores the
+        failed iterate, hands it back as the action, and warm-starts the next
+        step from it. Nothing downstream can tell that apart from a converged
+        solve, so an MPC baseline can quietly stop being an upper bound. These
+        counters are what ``solver_report`` publishes alongside the return.
+        """
+        stats = getattr(self._mpc, "solver_stats", None) or {}
+        self.solve_calls += 1
+        self.solve_iters += int(stats.get("iter_count", 0) or 0)
+        status = str(stats.get("return_status", ""))
+        capped = status in _IPOPT_CAP_STATUSES
+        if capped:
+            self.solve_capped += 1
+        if stats.get("success", True):
+            return True
+        self.solve_failures += 1
+        self.last_return_status = status
+        # A capped solve is still a usable answer: IPOPT was converging and we
+        # stopped it, which is the whole point of the cap. A solve that failed
+        # for any other reason -- infeasible, restoration failed, invalid
+        # number -- returns an iterate that means nothing, and do-mpc will warm
+        # start the next step from it and spread the damage.
+        return capped
+
+    def _save_guess(self):
+        """Snapshot the warm start, so a failed solve cannot poison the next.
+
+        The multipliers only exist once do-mpc has solved at least once, so
+        they are read defensively rather than assumed.
+        """
+        m = self._mpc
+        return {
+            k: np.array(v)
+            for k, v in (
+                ("opt_x", m.opt_x_num.master),
+                ("lam_g", getattr(m, "lam_g_num", None)),
+                ("lam_x", getattr(m, "lam_x_num", None)),
+            )
+            if v is not None
+        }
+
+    def _fallback(self, guess, u):
+        """Restore the last good warm start and hold the last good action."""
+        m = self._mpc
+        m.opt_x_num.master = guess["opt_x"]
+        for attr, key in (("lam_g_num", "lam_g"), ("lam_x_num", "lam_x")):
+            if key in guess:
+                setattr(m, attr, guess[key])
+        return u if self._last_u is None else self._last_u
+
+    def solver_report(self) -> dict:
+        """Convergence summary for the solves performed so far."""
+        calls = max(self.solve_calls, 1)
+        return {
+            "solver_calls": self.solve_calls,
+            "solver_failures": self.solve_failures,
+            "solver_capped": self.solve_capped,
+            "solver_mean_iters": round(self.solve_iters / calls, 1),
+            "solver_last_status": self.last_return_status,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +522,8 @@ class CSTRCasadiMPC(CasadiMPC):
         dC_a/dt = q/V*(Caf - C_a) - k0*exp(-EA/R/T)*C_a
         dT/dt   = q/V*(Ti - T) + (-ΔHr)*rA/(ρ·C) + UA*(T_c - T)/(ρ·C·V)
     """
+
+    SCALING = {"_x": {"C_a": 1.0, "T": 300.0}}
 
     def _build_mpc(self):
         p = self.params
@@ -331,6 +570,7 @@ class CSTRCasadiMPC(CasadiMPC):
             return p_tpl
 
         mpc.set_p_fun(p_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -391,6 +631,7 @@ class FirstOrderCasadiMPC(CasadiMPC):
             return p_tpl
 
         mpc.set_p_fun(p_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -415,6 +656,8 @@ class FourTankCasadiMPC(CasadiMPC):
     Inputs : [v1_raw, v2_raw] each ∈ [-1, 1]  →  [v1, v2] ∈ [v_min, v_max]
     ODE    : four-tank gravity-drain dynamics (see env.py)
     """
+
+    SCALING = {"_x": {"h1": 0.25, "h2": 0.25, "h3": 0.25, "h4": 0.25}}
 
     def _build_mpc(self):
         p = self.params
@@ -480,10 +723,35 @@ class FourTankCasadiMPC(CasadiMPC):
         mpc.bounds["upper", "_u", "v2_raw"] = 1.0
 
         # Keep levels above minimum to avoid sqrt(0)
-        mpc.bounds["lower", "_x", "h1"] = float(p.h_min)
-        mpc.bounds["lower", "_x", "h2"] = float(p.h_min)
-        mpc.bounds["lower", "_x", "h3"] = float(p.h_min)
-        mpc.bounds["lower", "_x", "h4"] = float(p.h_min)
+        # Both termination bounds, and soft.
+        #
+        # The plant does not clip these levels, it *ends the episode* when any
+        # of them reaches h_min or h_max. Only the lower bound was here, and it
+        # was hard, which is backwards on both counts. Hard was wrong because a
+        # hard bound the plant can walk the initial state onto makes the NLP
+        # infeasible at x0, and IPOPT answers that with a restoration phase and
+        # hundreds of iterations rather than an action. Missing h_max was worse:
+        # the controller was blind to half of a termination condition it is
+        # scored on, so it had no reason not to overflow a tank.
+        #
+        # Input bounds stay hard, because the optimiser owns those and can
+        # always satisfy them. State bounds get slacks, which is the usual
+        # division of labour.
+        for h in (h1, h2, h3, h4):
+            mpc.set_nl_cons(
+                f"{h.name()}_min",
+                -h,
+                ub=-float(p.h_min),
+                soft_constraint=True,
+                penalty_term_cons=1e3,
+            )
+            mpc.set_nl_cons(
+                f"{h.name()}_max",
+                h,
+                ub=float(p.h_max),
+                soft_constraint=True,
+                penalty_term_cons=1e3,
+            )
 
         self._target_h1 = float(p.target_h1_range[0])
         self._target_h2 = float(p.target_h2_range[0])
@@ -495,6 +763,7 @@ class FourTankCasadiMPC(CasadiMPC):
             return p_tpl
 
         mpc.set_p_fun(p_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -512,6 +781,32 @@ class FourTankCasadiMPC(CasadiMPC):
 # ---------------------------------------------------------------------------
 # GlassFurnace
 # ---------------------------------------------------------------------------
+
+
+# Integral gain and clamp for the furnace's offset-free correction, in kelvin.
+# The gain is deliberately slow against a 3960 s open-loop time constant: this
+# has to remove a standing offset over hundreds of steps, not chase noise.
+_FURNACE_BIAS_GAIN = 0.05
+_FURNACE_BIAS_LIMIT = 40.0
+_FURNACE_BIAS_RESET = True
+
+
+#: Checker nodes per chamber in the *controller's* regenerator model. The plant
+#: carries four; the controller carries two, and ``_extract_x0`` averages the
+#: plant's nodes down in pairs.
+#:
+#: This is the one knob that decides what the furnace baseline costs to record.
+#: The regenerator is two thirds of the controller's state vector, and IPOPT's
+#: cost grows superlinearly in problem size: at the plant's four nodes the NLP
+#: has 3168 variables and a bad seed ran 5.5 s per step, which is hours per
+#: episode against a plant that steps in 92 microseconds.
+#:
+#: Two nodes rather than one averaged stack. The single stack was what this
+#: model carried before, and it left a 2-6 K standing offset because everything
+#: downstream of the checker temperatures is nonlinear in them; two nodes keep
+#: the hot/cold split that sets air preheat, which is where that error came
+#: from, at half the states.
+_FURNACE_MPC_REGEN_NODES = 2
 
 
 class GlassFurnaceCasadiMPC(CasadiMPC):
@@ -543,9 +838,29 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
     anticipates step changes -- the advantage PID structurally cannot have.
     """
 
+    SCALING = {
+        "_x": {
+            "T_crown": 1000.0,
+            "T_melt": 1000.0,
+            "T_work": 1000.0,
+            "m_batch": 10000.0,
+            **{f"T_rA{i}": 1000.0 for i in range(_FURNACE_MPC_REGEN_NODES)},
+            **{f"T_rB{i}": 1000.0 for i in range(_FURNACE_MPC_REGEN_NODES)},
+        },
+        "_z": {"T_gas": 2000.0},
+    }
+
     def _build_mpc(self):
         p = self.params
-        from target_gym.glass_furnace.env import N_SETPOINTS
+        from target_gym.glass_furnace.env import (
+            FUEL_DEAD_TIME_STEPS,
+            N_SETPOINTS,
+            firing_fraction,
+        )
+
+        if not hasattr(self, "_pipeline"):
+            nominal = 0.5 * (p.fuel_min + p.fuel_max)
+            self._pipeline = np.full(FUEL_DEAD_TIME_STEPS, nominal)
 
         model = do_mpc.model.Model("continuous")
         SB = 5.670374419e-8
@@ -555,36 +870,82 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         T_melt = model.set_variable("_x", "T_melt")
         T_work = model.set_variable("_x", "T_work")
         m_batch = model.set_variable("_x", "m_batch")
-        T_rh = model.set_variable("_x", "T_rh")
-        T_rm = model.set_variable("_x", "T_rm")
-        T_rc = model.set_variable("_x", "T_rc")
+        # Both regenerator chambers, at the plant's own node count. The MPC is
+        # presented as an upper bound, so it is entitled to the plant's model as
+        # well as its state -- it already reads the true state in _extract_x0.
+        # The previous version collapsed these two alternating four-node
+        # chambers onto one three-node stack "at the cycle average", which is
+        # exact only if everything downstream is linear in these temperatures.
+        # It is not: measured by check 13 of the model review checklist, the
+        # plant ran +0.0275 K per control interval hotter than that model,
+        # one-signed on 71% of settled steps, and multiplied by the crown's
+        # 132-step time constant that is the 2-6 K standing offset which put
+        # this MPC 16% behind its own PID.
+        from target_gym.glass_furnace.env import N_REGEN_NODES
+
+        n_regen = _FURNACE_MPC_REGEN_NODES
+        T_rA = [model.set_variable("_x", f"T_rA{i}") for i in range(n_regen)]
+        T_rB = [model.set_variable("_x", f"T_rB{i}") for i in range(n_regen)]
         T_gas = model.set_variable("_z", "T_gas")  # algebraic: quasi-steady flame
         u_raw = model.set_variable("_u", "u_raw")
         model.set_variable("_tvp", "target_T_crown")
+        # Firing actually released, as a fraction of commanded: 1 away from a
+        # reversal, near zero while the valves change over. Deterministic in
+        # time and therefore known to the controller, which is the point of
+        # modelling it -- the dip is a periodic upset a predictive controller
+        # can plan through and a PID can only react to.
+        firing = model.set_variable("_tvp", "firing")
+        # Fuel already in the pipeline. The plant applies what was commanded
+        # FUEL_DEAD_TIME_STEPS ago, so the first intervals of any plan are
+        # already decided and nothing the optimiser does can change them.
+        # ``commit`` is 1 over those intervals and 0 after.
+        u_committed = model.set_variable("_tvp", "u_committed")
+        commit = model.set_variable("_tvp", "commit")
+        # The reversal is a deterministic function of time, so the oracle knows
+        # it exactly rather than averaging it away. 0 -> A preheats air.
+        a_is_air = model.set_variable("_tvp", "a_is_air")
 
-        m_fuel = p.fuel_min + 0.5 * (u_raw + 1.0) * (p.fuel_max - p.fuel_min)
+        m_fuel_free = p.fuel_min + 0.5 * (u_raw + 1.0) * (p.fuel_max - p.fuel_min)
+        m_fuel = firing * (commit * u_committed + (1.0 - commit) * m_fuel_free)
         m_air = p.AFR * (1.0 + p.excess_air) * m_fuel
         m_gas = m_fuel + m_air
 
-        # Cycle-averaged regenerator: air climbs cold -> hot, exhaust descends.
         eps = p.eps_regen_node
-        Ta1 = p.T_ambient + eps * (T_rc - p.T_ambient)
-        Ta2 = Ta1 + eps * (T_rm - Ta1)
-        T_air = Ta2 + eps * (T_rh - Ta2)
-        Te1 = T_gas - eps * (T_gas - T_rh)
-        Te2 = Te1 - eps * (Te1 - T_rm)
-        T_stack = Te2 - eps * (Te2 - T_rc)
 
-        # Half the cycle in each role -> average the two duties.
-        Q_rh = 0.5 * (
-            m_gas * p.c_p_gas * (T_gas - Te1) - m_air * p.c_p_air * (T_air - Ta2)
-        )
-        Q_rm = 0.5 * (m_gas * p.c_p_gas * (Te1 - Te2) - m_air * p.c_p_air * (Ta2 - Ta1))
-        Q_rc = 0.5 * (
-            m_gas * p.c_p_gas * (Te2 - T_stack)
-            - m_air * p.c_p_air * (Ta1 - p.T_ambient)
-        )
-        UA_node = p.U_regen * p.A_regen / 3.0
+        def _duties(nodes):
+            """Exhaust and air duties for one chamber, mirroring the plant.
+
+            Exhaust enters at the hot end and works down; air enters at the cold
+            end and works up. Each node exchanges with the stream passing it at
+            per-node effectiveness ``eps_regen_node``.
+            """
+            t_in = T_gas
+            q_exh = []
+            for node in nodes:  # hot end first
+                t_out = t_in - eps * (t_in - node)
+                q_exh.append(m_gas * p.c_p_gas * (t_in - t_out))
+                t_in = t_out
+            t_stack = t_in
+
+            t_in = p.T_ambient
+            q_air_rev = []
+            for node in reversed(nodes):  # cold end first
+                t_out = t_in + eps * (node - t_in)
+                q_air_rev.append(-m_air * p.c_p_air * (t_out - t_in))
+                t_in = t_out
+            return q_exh, list(reversed(q_air_rev)), t_in, t_stack  # noqa: E501
+
+        qA_exh, qA_air, TA_air_out, _ = _duties(T_rA)
+        qB_exh, qB_air, TB_air_out, _ = _duties(T_rB)
+
+        # A chamber does one duty at a time, never both at half rate.
+        QA = [a_is_air * qa + (1.0 - a_is_air) * qe for qa, qe in zip(qA_air, qA_exh)]
+        QB = [(1.0 - a_is_air) * qb + a_is_air * qe for qb, qe in zip(qB_air, qB_exh)]
+        T_air = a_is_air * TA_air_out + (1.0 - a_is_air) * TB_air_out
+        UA_node = p.U_regen * p.A_regen / n_regen
+        # The checker stack's total heat capacity is fixed by the plant; the
+        # controller just divides it into fewer, larger nodes.
+        C_regen_node = p.C_regen_node * (N_REGEN_NODES / n_regen)
 
         coverage = m_batch / p.m_batch_full
         melt_open = 1.0 - p.batch_shield * coverage
@@ -667,9 +1028,15 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
             / (p.C_work * cp_work / p.c_p_glass_a),
         )
         model.set_rhs("m_batch", p.m_pull / p.batch_yield - melt_rate)
-        model.set_rhs("T_rh", (Q_rh - UA_node * (T_rh - p.T_ambient)) / p.C_regen_node)
-        model.set_rhs("T_rm", (Q_rm - UA_node * (T_rm - p.T_ambient)) / p.C_regen_node)
-        model.set_rhs("T_rc", (Q_rc - UA_node * (T_rc - p.T_ambient)) / p.C_regen_node)
+        for i in range(n_regen):
+            model.set_rhs(
+                f"T_rA{i}",
+                (QA[i] - UA_node * (T_rA[i] - p.T_ambient)) / C_regen_node,
+            )
+            model.set_rhs(
+                f"T_rB{i}",
+                (QB[i] - UA_node * (T_rB[i] - p.T_ambient)) / C_regen_node,
+            )
         model.setup()
 
         mpc = do_mpc.controller.MPC(model)
@@ -688,17 +1055,25 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         # Share the minimiser of env.compute_reward, not its shape.
         #
         # This previously normalised the error by the crown's whole 250 K
-        # envelope while the environment scores it against ``tracking_scale``,
-        # 40 K -- so a 40 K error, which the environment scores as zero, entered
-        # the objective at 0.71, six times flatter than the reward being graded.
-        # Against an unchanged fuel penalty the controller duly sold tracking for
-        # fuel, and lost to the PID on 7 of 10 seeds.
+        # envelope, six times flatter than the band the reward discriminates
+        # over. Against an unchanged fuel penalty the controller duly sold
+        # tracking for fuel, and lost to the PID on 7 of 10 seeds.
         #
         # The old form was also non-monotonic: ``((scale - err)/scale)**2`` turns
         # back upward past ``err = scale``, so beyond twice it the objective
         # preferred *more* error. A plain squared normalised error is monotone,
         # smooth, and minimised in the same place as the reward.
-        scale = float(p.tracking_scale)
+        #
+        # ``tracking_band``, the same field name the four-tank, the
+        # distillation column and the pH loop carry: the error at which
+        # tracking is bad for this plant. It read ``params.tracking_scale``,
+        # 40 K, left over from when the reward was ``clip(1 - err/40, 0, 1)**2``
+        # -- the reward has been log-scaled for a while and that field was dead.
+        # 40 K against errors of about 1 K put the tracking term at 6e-4 while
+        # the fuel penalty stayed O(1), so the objective was nearly flat in the
+        # direction being scored, which is both why this MPC trails its own PID
+        # and why IPOPT struggles on it.
+        scale = float(p.tracking_band)
         fuel_span = float(p.fuel_max - p.fuel_min)
         err = target_post - T_crown_post
         err_abs = casadi.sqrt(err * err + 1e-4)  # smooth |err|
@@ -721,8 +1096,15 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
         default_target = float(sum(p.target_T_crown_range) / 2.0)
         self._target_schedule = np.full(N_SETPOINTS, default_target)
         self._current_step = 0
+        self._bias = 0.0
+        self._bias_slot = -1
+        # Overridden by make_glass_furnace_mpc; defaults here so a directly
+        # constructed instance still behaves.
+        self._bias_gain = _FURNACE_BIAS_GAIN
+        self._bias_reset = _FURNACE_BIAS_RESET
         self._max_steps = int(p.max_steps_in_episode)
         self._n_setpoints = int(N_SETPOINTS)
+        p_rev = float(p.reversal_period)
         tvp_tpl = mpc.get_tvp_template()
 
         def tvp_fun(_t):
@@ -733,39 +1115,130 @@ class GlassFurnaceCasadiMPC(CasadiMPC):
                     self._n_setpoints - 1,
                 )
                 tvp_tpl["_tvp", k, "target_T_crown"] = float(
-                    self._target_schedule[slot]
+                    self._target_schedule[slot] + self._bias
+                )
+                # The reversal is deterministic in time, so the oracle supplies
+                # its exact phase across the whole horizon rather than averaging
+                # it away: 1 while chamber A preheats the air, 0 while B does.
+                cycles = (future * self.mpc_dt) / p_rev
+                tvp_tpl["_tvp", k, "a_is_air"] = float(1.0 - (np.floor(cycles) % 2.0))
+                tvp_tpl["_tvp", k, "firing"] = float(firing_fraction(future, p, xp=np))
+                # The first FUEL_DEAD_TIME_STEPS intervals burn what is already
+                # in the pipeline. Beyond that the optimiser decides.
+                committed = k < len(self._pipeline)
+                tvp_tpl["_tvp", k, "commit"] = 1.0 if committed else 0.0
+                tvp_tpl["_tvp", k, "u_committed"] = (
+                    float(self._pipeline[k]) if committed else 0.0
                 )
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
 
+    @staticmethod
+    def _coarsen(nodes) -> np.ndarray:
+        """The plant's checker nodes averaged onto the controller's, hot end first.
+
+        Both chambers are kept, because they alternate duty and averaging them
+        together is what left a standing offset. What is coarsened is the depth
+        resolution within a chamber, which is a smooth profile down the stack:
+        contiguous groups average to the temperature a node of that size would
+        hold, and the group heat capacity is scaled to match in ``_build_mpc``.
+        """
+        x = np.asarray(nodes, dtype=float)
+        n = _FURNACE_MPC_REGEN_NODES
+        if x.size == n:
+            return x
+        return x.reshape(n, x.size // n).mean(axis=1)
+
     def _extract_x0(self, state):
-        # Collapse the plant's two 4-node chambers onto the model's 3 nodes by
-        # averaging the chambers (they alternate) and resampling the profile.
-        profile = 0.5 * (
-            np.asarray(state.T_rA, dtype=float) + np.asarray(state.T_rB, dtype=float)
-        )
-        resampled = np.interp(
-            np.linspace(0.0, 1.0, 3), np.linspace(0.0, 1.0, len(profile)), profile
-        )
-        return np.array(
+        """The plant's regenerator state, both chambers, coarsened in depth.
+
+        This once averaged the two chambers together *and* resampled four nodes
+        onto three; that cost 2-6 K of standing offset, because everything
+        downstream of the checker temperatures is nonlinear in them and the two
+        chambers are never at the same temperature. Both chambers are kept now.
+        The depth resolution is halved instead, which is what makes the NLP
+        affordable: see ``_FURNACE_MPC_REGEN_NODES``.
+        """
+        return np.concatenate(
             [
-                float(state.T_crown),
-                float(state.T_melt),
-                float(state.T_work),
-                float(state.m_batch),
-                resampled[0],
-                resampled[1],
-                resampled[2],
+                np.array(
+                    [
+                        float(state.T_crown),
+                        float(state.T_melt),
+                        float(state.T_work),
+                        float(state.m_batch),
+                    ]
+                ),
+                self._coarsen(state.T_rA),
+                self._coarsen(state.T_rB),
             ]
         )
+
+    def reset(self):
+        """Clear the offset-free bias as well as the warm start.
+
+        Without this the bias earned on one episode is carried into the next,
+        where it is a standing setpoint error rather than a correction.
+        """
+        super().reset()
+        self._bias = 0.0
+        self._bias_slot = -1
 
     def _update_setpoint(self, state):
         self._target_schedule = np.asarray(state.target_schedule, dtype=float)
         self._current_step = int(state.time)
+        # What the plant will burn over the next intervals regardless of what is
+        # decided now. An upper-bound controller reads the true state, and this
+        # is part of it.
+        self._pipeline = np.asarray(state.fuel_pipeline, dtype=float)
+
+        # Offset-free correction. ``_extract_x0`` collapses the plant's two
+        # four-node regenerator chambers onto the model's three nodes by
+        # averaging, which is a deliberate model reduction and therefore a
+        # structural plant-model mismatch. A finite-horizon MPC with mismatch
+        # settles with a steady-state offset; a PID's integrator does not, and
+        # over a long episode that is the whole difference between them.
+        #
+        # Measured on a 1600-step episode before this existed: for the first
+        # half of the episode the two are indistinguishable, both still
+        # approaching, and from the sixth decile the PID converges to 0.0-0.5 K
+        # of error while the MPC plateaus at 2-6 K. Per step that was 0.619
+        # against the PID's 0.765 -- a 19% shortfall that the previous 240-step
+        # episode was far too short to see, since it ended while both were still
+        # on their way.
+        #
+        # The remedy is the textbook one: integrate the measured tracking error
+        # into a bias and shift the setpoint the solver is given, which is the
+        # disturbance model of offset-free MPC in its simplest form. The gain is
+        # small relative to the plant's 3960 s time constant, and the bias is
+        # clamped so a saturated actuator cannot wind it up.
+        slot = min(
+            (self._current_step * self._n_setpoints) // self._max_steps,
+            self._n_setpoints - 1,
+        )
+        # The bias absorbs model *gain* error as well as a standing disturbance,
+        # and gain error is specific to an operating point. Carrying it across a
+        # setpoint change applies the previous target's correction to the new
+        # one: measured, that put an 11.4 K excursion into the decile after a
+        # schedule step, worse there than having no bias at all. So it is
+        # dropped when the schedule moves, and re-earned.
+        if self._bias_reset and slot != self._bias_slot:
+            self._bias_slot = slot
+            self._bias = 0.0
+        self._bias_slot = slot
+        error = float(self._target_schedule[slot]) - float(state.T_crown)
+        self._bias = float(
+            np.clip(
+                self._bias + self._bias_gain * error,
+                -_FURNACE_BIAS_LIMIT,
+                _FURNACE_BIAS_LIMIT,
+            )
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -801,6 +1274,23 @@ class ReactorCasadiMPC(CasadiMPC):
     one action across ``control_period`` physics sub-steps, so planning at the
     raw physics step would model a control authority that does not exist.
     """
+
+    SCALING = {
+        "_x": {
+            "n": 1.0,
+            "C0": 100.0,
+            "C1": 400.0,
+            "C2": 100.0,
+            "C3": 70.0,
+            "C4": 5.0,
+            "C5": 0.8,
+            "T_fuel": 1000.0,
+            "T_coolant": 600.0,
+            "I_hat": 1.0,
+            "Xe_hat": 1.0,
+            "rho_ext": 0.002,
+        }
+    }
 
     def __init__(self, env, params, horizon: int = 20, mpc_dt: float = None):
         if mpc_dt is None:
@@ -923,6 +1413,7 @@ class ReactorCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -961,7 +1452,12 @@ class ReactorCasadiMPC(CasadiMPC):
             self._mpc.x0 = x0
             self._mpc.set_initial_guess()
             self._initialized = True
-        rho_rate = float(np.array(self._mpc.make_step(x0)).flatten()[0])
+        guess = self._save_guess()
+        u = np.array(self._mpc.make_step(x0)).flatten()
+        if not self._record_solve():
+            u = self._fallback(guess, u)
+        self._last_u = u
+        rho_rate = float(u[0])
 
         p = self.params
         rho_next = float(
@@ -1000,6 +1496,8 @@ class HVACCasadiMPC(CasadiMPC):
     afternoon. A PID sees none of that until it has already happened, and with
     a 43 h thermal time constant "already happened" is far too late.
     """
+
+    SCALING = {"_x": {"T_mass": 20.0, "Q_emitter": 800.0}}
 
     def __init__(self, env, params, horizon: int = 24, mpc_dt: float = None):
         super().__init__(
@@ -1109,6 +1607,7 @@ class HVACCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -1143,6 +1642,8 @@ class PHCasadiMPC(CasadiMPC):
     and leans on receding-horizon feedback to reject the drift -- the same
     treatment the glass furnace gives its pull-rate disturbance.
     """
+
+    SCALING = {"_x": {"Wa": 3e-4, "Wb": 3e-4}, "_z": {"pH": 7.0}}
 
     def __init__(self, env, params, horizon: int = 20, mpc_dt: float = None):
         super().__init__(
@@ -1225,6 +1726,7 @@ class PHCasadiMPC(CasadiMPC):
             return tvp_tpl
 
         mpc.set_tvp_fun(tvp_fun)
+        self._apply_scaling(mpc)
         mpc.set_param(nlpsol_opts=self._quiet_ipopt())
         mpc.setup()
         return mpc
@@ -1251,13 +1753,78 @@ class PHCasadiMPC(CasadiMPC):
             self._mpc.z0 = np.array([float(state.pH)])
             self._mpc.set_initial_guess()
             self._initialized = True
+        guess = self._save_guess()
         u = np.array(self._mpc.make_step(x0)).flatten()
+        if not self._record_solve():
+            u = self._fallback(guess, u)
+        self._last_u = u
         return float(np.clip(u, -1.0, 1.0)[0])
 
 
 # ============================================================================
 # Factory functions
 # ============================================================================
+
+
+_PLANE_STALL_MARGIN = 1.3  # multiples of stall speed at which the barrier starts
+_PLANE_BARRIER_WEIGHT = 10.0
+
+
+def _plane_objective(state, params):
+    """The aircraft's own reward, less a barrier on flying into the stall.
+
+    The altitude reward scores one thing and the aircraft has two actuators, so
+    the planner is free to buy altitude with airspeed. Over a 90 s window that
+    is the *best* thing it can do when the target is thousands of metres away:
+    a zoom climb converts kinetic energy to potential energy far faster than
+    the engines can supply it. Measured on ``plane_steps`` seed 0, that is
+    exactly what the plan did -- airspeed fell monotonically from 201 to 30 m/s
+    over 90 s while the aircraft climbed 3300 m, touched the commanded altitude
+    with nothing left, departed at 91 deg angle of attack and hit the ground at
+    t=372. It happened on ``plane`` too; there the phugoid that followed
+    happened to damp out, which is luck rather than control.
+
+    Angle of attack is the wrong thing to fence, even though it is what
+    actually stalls: through that whole manoeuvre it sat at 4-8 deg and only
+    crossed 15 deg at t=90, one step from the departure and at the very end of
+    the planning window. Airspeed decays through the entire climb, so a floor
+    under it is a constraint the planner can see coming and descend.
+
+    The floor is the stall speed at this mass and altitude rather than a fixed
+    number, since both move: ``sqrt(2 m g / (rho S CL_max))`` is where the wing
+    can no longer carry the weight, and the barrier switches on at 1.3 times
+    it, the usual approach margin. Bounded in [0, 1] by construction, which is
+    what lets ``done_value`` stay below the worst step the planner can plan, so
+    flying into the ground cannot look better than flying slowly.
+
+    Measured on ``plane_steps`` seed 0 over 400 s: return 304 against 83 for
+    the unprotected planner, settled error 0.1 m, and airspeed held above
+    128 m/s with a worst angle of attack of 7.7 deg. On ``plane``, 226 against
+    189. Like the turbine's barrier, the constants barely matter -- weight 30
+    scores 299 and a 1.15 margin 299 -- which is the signature of a term
+    shaping the approach rather than trading against the objective.
+
+    Two alternatives, both measured and both rejected. Doubling the tail to
+    ``n_tail=120`` prices more of the aftermath and does fix seed 0 (274), but
+    it costs two thirds again in compute and only moves the horizon at which
+    the same trade becomes profitable. Making the planner hold airspeed
+    outright, by planning against ``speed_weight=1.0``, flies beautifully for
+    400 s (166, angle of attack 2.1 deg) and then crashes anyway at t=1260 on
+    the full episode and at t=386 on seed 2: it changes which trim the planner
+    settles into without ever putting a floor under the trade.
+    """
+    from target_gym.plane.env import compute_reward
+
+    reward = compute_reward(state, params)
+    speed = jnp.sqrt(state.x_dot**2 + state.z_dot**2)
+    v_stall = jnp.sqrt(
+        2.0
+        * state.m
+        * params.gravity
+        / (state.rho * params.wings_surface * params.CL_max)
+    )
+    margin = speed / (_PLANE_STALL_MARGIN * v_stall)
+    return reward - _PLANE_BARRIER_WEIGHT * jnp.maximum(1.0 - margin, 0.0) ** 2
 
 
 def make_plane_mpc(
@@ -1267,6 +1834,7 @@ def make_plane_mpc(
     n_iter: int = 50,
     lr: float = 0.05,
     n_tail: int = 60,
+    objective_fn=_plane_objective,
 ):
     """Gradient MPC for Airplane2D — optimises both power and stick in [-1, 1].
 
@@ -1274,15 +1842,25 @@ def make_plane_mpc(
     including aerodynamic coefficients that are not expressible in CasADi
     without a full symbolic re-implementation.  dt=1.0 s; horizon=30.
 
-    ``n_tail=60`` is what makes this controller work. Optimising 30 s of flight
-    and being charged for nothing beyond it, the plan climbed hard, ran the
-    airspeed down and left the aircraft outside the altitude envelope just past
-    the horizon: it settled 654x worse than the PID and crashed in one episode
-    of two. Simulating 60 further seconds on the held action -- which for this
-    aircraft is close to trim -- prices that ending into the objective. Measured
-    over 600-step episodes, settled tracking error goes from 2949 m to 0.083 m,
-    which is 55x *better* than the PID rather than 654x worse, with no
-    terminations. Sixty is the knee: 120 is no better (0.092 m) and costs twice.
+    Two things make it fly. The objective carries a stall barrier, without
+    which the planner trades all its airspeed for altitude on every
+    acquisition and departs; see ``_plane_objective``, which is where that is
+    measured. And ``n_tail=60``: optimising 30 s of flight and being charged
+    for nothing beyond it, the plan climbed hard and left the aircraft outside
+    the altitude envelope just past the horizon, settling 654x worse than the
+    PID and crashing in one episode of two. Simulating 60 further seconds on
+    the held action -- which for this aircraft is close to trim -- prices that
+    ending into the objective. Measured over 600-step episodes, settled
+    tracking error went from 2949 m to 0.083 m, with no terminations. Sixty is
+    the knee: 120 is no better on a fixed setpoint and costs twice.
+
+    The tail alone was not enough, which is why the barrier is here. It fixes
+    the ending the plan can *see*; the zoom climb is an ending the plan likes,
+    and no affordable horizon changes that.
+
+    ``done_value`` sits below the worst step the objective can score, so a plan
+    that reaches the ground is charged for the rest of the horizon rather than
+    scoring the 0.0 that a barrier-free positive reward could rely on.
     """
     return GradientMPC(
         env,
@@ -1294,6 +1872,8 @@ def make_plane_mpc(
         n_iter=n_iter,
         lr=lr,
         n_tail=n_tail,
+        objective_fn=objective_fn,
+        done_value=-(_PLANE_BARRIER_WEIGHT + 1.0),
     )
 
 
@@ -1320,6 +1900,122 @@ def make_plane3d_mpc(
         horizon=horizon,
         n_iter=n_iter,
         lr=lr,
+    )
+
+
+#: Fraction of ``slot_tolerance`` at which the patrol surrogate puts its
+#: curvature. See :func:`_patrol_objective`.
+_PATROL_ERROR_SCALE = 0.25
+
+
+def _patrol_objective(state, params):
+    """Slot tracking and heading alignment, with a floor under the follower's speed.
+
+    Two departures from the environment's own reward, for the usual two
+    reasons.
+
+    The tracking term is ``1 / (1 + (e / scale)**2)`` rather than the shipped
+    log-scaled reward. Both are bounded in [0, 1] and both are maximised at
+    zero slot error, but a log-scaled reward's gradient decays like ``1/e``.
+
+    ``scale`` is a quarter of ``slot_tolerance``, not the tolerance itself.
+    The tolerance is a pass/fail bound; a controller that is actually good
+    operates well inside it -- the shipped PID settles at 8-13 m against a 60 m
+    tolerance -- so curvature at 60 m leaves the surrogate nearly flat across
+    the whole range where the decisions are made. Chosen by measurement rather
+    than argument, over two seeds at 300 iterations: a quarter of the tolerance
+    scores 175.7, the raw log reward 144.6, and the full tolerance 138.2. The
+    precision floor of 3 m is far worse again (19.4 at 50 iterations), so this
+    is an interior optimum and not a monotone preference for tighter scaling.
+
+    The barrier is the aircraft objective's, for the same reason it exists
+    there. The follower is the same airframe with the same power and stick, and
+    the slot can be several hundred metres away at reset, so a planner is free
+    to buy position with airspeed and arrive at the slot with nothing left.
+    Patrol terminates on the altitude envelope rather than on stall, so a
+    departure costs the planner only the steps after it falls out of the sky --
+    which a finite horizon may not reach.
+
+    Multiplicative in the alignment factor, as the environment's reward is: a
+    wingman flies the slot *parallel* to the lead, not merely at the point.
+    """
+    from target_gym.patrol.env import heading_alignment, slot_error
+
+    err = slot_error(state) / (_PATROL_ERROR_SCALE * params.slot_tolerance)
+    track = 1.0 / (1.0 + err**2)
+    align = heading_alignment(state, params)
+
+    f = state.follower
+    speed = jnp.sqrt(f.x_dot**2 + f.y_dot**2 + f.z_dot**2)
+    v_stall = jnp.sqrt(
+        2.0 * f.m * params.gravity / (f.rho * params.wings_surface * params.CL_max)
+    )
+    margin = speed / (_PLANE_STALL_MARGIN * v_stall)
+    penalty = _PLANE_BARRIER_WEIGHT * jnp.maximum(1.0 - margin, 0.0) ** 2
+    return track * align - penalty
+
+
+def make_patrol_mpc(
+    env,
+    params,
+    horizon: int = 30,
+    n_iter: int = 300,
+    lr: float = 0.05,
+    n_tail: int = 60,
+):
+    """Gradient MPC for the formation-keeping follower.
+
+    A ``GradientMPC`` rather than a CasADi one, and that is what makes this
+    tractable at all. The obstacle recorded against a patrol MPC was that the
+    reference is a *manoeuvring lead*, so a symbolic model would need the
+    lead's whole future trajectory wired in as a time-varying parameter. That
+    is true of the CasADi route and irrelevant here: the lead is scripted and
+    deterministic -- ``step_lead`` advances it with a heading autopilot at a
+    fixed ``lead_turn_rate`` -- so a planner that differentiates the true
+    ``step_env`` propagates the lead for free, exactly as it propagates the
+    follower.
+
+    The horizon is 30 s at the environment's 1 s step, which covers the slot
+    capture from a 40 m spawn offset with room for the lead's turn to develop,
+    and the settings that go with it are the 2D aircraft's for the reasons that
+    file already records. ``n_tail=60`` charges the plan for twice the flight
+    it optimises, so it cannot park the follower somewhere that leaves the
+    altitude envelope just past the horizon. ``done_value`` sits below the
+    worst step this objective can score: with the barrier subtracted the
+    objective is no longer non-negative, so a ``done_value`` of 0 would make
+    flying out of the envelope score *better* than any penalised step, and the
+    planner takes that trade.
+
+    ``n_iter`` is 300 where every other gradient planner here uses 50, and that
+    single number is what decides whether this baseline is an upper bound at
+    all. Measured over two seeds against a PID scoring ~105: 106.1 at 100
+    iterations, 130.3 at 150, 153.8 at 300, 171.5 at 600 with no tail. The
+    planner was not stuck, it was stopping early -- 90 decision variables under
+    projected gradient descent -- and every objective and horizon variant tried
+    before this was being compared at a non-converged optimum, which is why
+    none of them looked decisive.
+
+    The other tasks hide this. ``plane3d`` uses the same 50 iterations and wins
+    enormously, but its PIDs score 0.16 of ceiling, so an under-converged plan
+    clears them anyway. The patrol PID scores 0.50, and a bar that high is what
+    made the under-convergence visible.
+
+    The tail earns its keep here rather than costing: at 300 iterations
+    ``n_tail=60`` scores 175.7 against 153.8 without it, which is better than
+    doubling the iterations to 600 (171.5) and half the cost.
+    """
+    return GradientMPC(
+        env,
+        params,
+        action_dim=3,
+        action_lb=-1.0,
+        action_ub=1.0,
+        horizon=horizon,
+        n_iter=n_iter,
+        lr=lr,
+        n_tail=n_tail,
+        objective_fn=_patrol_objective,
+        done_value=-(_PLANE_BARRIER_WEIGHT + 1.0),
     )
 
 
@@ -1532,6 +2228,17 @@ class SamplingMPC:
             body, (mean, std, key), None, length=self.n_iter
         )
         return mean, std
+
+    def solver_report(self) -> dict:
+        """No external solver, so no convergence to report.
+
+        Part of the planner interface rather than a special case at the call
+        site: the recorder asks every controller for its solver health, and a
+        planner that has none should say so rather than raise. Leaving it off
+        cost a 44-minute record that crashed on the one sampling planner in the
+        suite after every other environment had already finished.
+        """
+        return {}
 
     def step(self, _obs, state):
         """Return the next action. ``_obs`` is ignored (kept for API symmetry)."""
@@ -1813,7 +2520,13 @@ def make_hvac_mpc(env, params, horizon: int = 24):
     return HVACCasadiMPC(env, params, horizon=horizon)
 
 
-def make_glass_furnace_mpc(env, params, horizon: int = 60):
+def make_glass_furnace_mpc(
+    env,
+    params,
+    horizon: int = 60,
+    bias_gain: float = _FURNACE_BIAS_GAIN,
+    bias_reset_on_setpoint: bool = _FURNACE_BIAS_RESET,
+):
     """CasADi/IPOPT MPC for the GlassFurnace (3-zone lumped thermal model).
 
     With delta_t=30 s, horizon=60 gives 30 min lookahead.  The crown thermal
@@ -1821,4 +2534,7 @@ def make_glass_furnace_mpc(env, params, horizon: int = 60):
     scheduled setpoint change and pre-cool / pre-heat accordingly (which PID
     cannot do — that's the whole point of the schedule).
     """
-    return GlassFurnaceCasadiMPC(env, params, horizon=horizon)
+    mpc = GlassFurnaceCasadiMPC(env, params, horizon=horizon)
+    mpc._bias_gain = float(bias_gain)
+    mpc._bias_reset = bool(bias_reset_on_setpoint)
+    return mpc

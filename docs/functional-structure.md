@@ -9,7 +9,10 @@ looks most attractive is the half JAX cannot support.**
 
 Three of the library's central shapes are monadic without saying so.
 
-`step_env` is `(key, state, action, params) -> (obs, state', reward, done, info)`.
+`step_env` is `(key, state, action, params) -> (obs, state', reward, terminated,
+info)`. Not `done`: gymnax 1.0 splits that into natural termination, which
+`step_env` reports, and truncation, which the base `step` derives from the
+step count.
 That is a state transformer that also emits an output — State plus Writer, in
 the usual naming. `jax.lax.scan`, which the runners already use, *is* the fold
 of that monad: it threads the carried state and collects the outputs, which is

@@ -98,6 +98,27 @@ Three tasks share these dynamics and differ only in the reference:
 **Patrol** adds a second aircraft and a slot defined relative to it, but no new
 physics.
 
+### Observation
+
+Each task exposes what its own reference needs, on top of the longitudinal
+state the 2D aircraft reports: bank angle and roll rate, heading, and the
+task's own error terms -- commanded heading for the heading task, the offset to
+the nearest point on the path for the circle, racetrack and figure-8.
+
+What is hidden is the same in every case and is the same as in 2D: **the gust
+field**. Turbulence is a disturbance, and an aircraft flies into it without
+warning.
+
+The honest framing is that these tasks are *not* deeply partially observed, and
+should not be quoted as if they were. The aircraft knows where it is and where
+the path is. Their difficulty is elsewhere: the aileron commands a roll rate
+rather than a bank angle, so heading control is a cascade through two
+integrators; the turn radius at cruise is kilometres, so the reference is large
+compared with what the aircraft can do about it; and the lift the wing can make
+bounds how tight a turn is available at all. For genuinely hidden references,
+see `patrol_bearing_only`, where the lead's heading is not measured and must be
+reconstructed.
+
 ### The tracking reward
 
 Every task composes its objectives multiplicatively — both must be met, not one
@@ -156,8 +177,11 @@ precision the reward was paying for. It is the same failure as check 11 of the
 model review checklist, one level down: there the *metric* could not see what the
 reward asked for, here the *integrator* could not.
 
-It costs throughput, measured at batch 4096: the 3D aircraft goes from 1.88 to
-1.05 M steps/s and the 2D aircraft from 2.71 to 1.61. The 2D aircraft's own
+It costs throughput: measured at batch 4096 when the change was made, the 3D
+aircraft went from 1.88 to 1.05 M steps/s and the 2D aircraft from 2.71 to 1.61.
+Those are the numbers that justified the trade; current figures on whatever
+machine you are reading this from are in
+[docs/performance.md](../../docs/performance.md). The 2D aircraft's own
 error at one substep was 0.823 m, inside its 1 m floor rather than outside it,
 but it is set the same way so the family stays consistent.
 
@@ -205,3 +229,27 @@ remains is quality rather than absence. The follower settles roughly 139 m from
 its slot against a 60 m tolerance, so six formation scenarios are `strict`
 xfail. That is a controller gap, not a physics gap; it is tracked in
 [the patrol contract](../patrol/PHYSICS.md).
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `plane3d_circle` | 300 | 1 | 5 min | 3 in [-1, 1] | 17 | 26 |
+| `plane3d_figure8` | 400 | 1 | 7 min | 3 in [-1, 1] | 19 | 26 |
+| `plane3d_heading` | 200 | 1 | 3 min | 3 in [-1, 1] | 15 | 26 |
+| `plane3d_racetrack` | 650 | 1 | 11 min | 3 in [-1, 1] | 21 | 26 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

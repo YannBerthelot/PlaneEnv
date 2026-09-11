@@ -363,11 +363,26 @@ def test_reward_is_clipped_below_at_zero_comfort(params):
 
 
 def test_energy_use_reduces_reward(params):
+    """Energy is priced into the reward only when ``energy_weight`` says so.
+
+    It is zero for the 0.6 line, so the reward scores comfort alone and the two
+    are equal. The term stays wired, so raising the weight restores the trade;
+    see the roadmap item on framing running cost. Asserting both ways keeps the
+    wiring covered either way.
+    """
     env = BuildingHVAC()
     _, state = env.reset_env(jax.random.PRNGKey(0), params)
     cold = state.replace(T_air=21.0, target_T=21.0, Q_emitter=0.0)
     hot = cold.replace(Q_emitter=params.Q_heat_max)
-    assert float(compute_reward(cold, params)) > float(compute_reward(hot, params))
+    if float(params.energy_weight) == 0.0:
+        assert float(compute_reward(cold, params)) == pytest.approx(
+            float(compute_reward(hot, params))
+        )
+    else:
+        assert float(compute_reward(cold, params)) > float(compute_reward(hot, params))
+
+    priced = params.replace(energy_weight=0.15)
+    assert float(compute_reward(cold, priced)) > float(compute_reward(hot, priced))
 
 
 def test_terminates_when_the_zone_freezes_or_overheats(params):

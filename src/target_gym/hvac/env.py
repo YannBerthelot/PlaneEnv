@@ -104,22 +104,32 @@ class HVACParams(EnvParams):
     setpoint_occupied_range: Tuple[float, float] = (20.0, 22.5)
 
     # ---- Comfort / termination bounds ----
-    T_air_min: float = 5.0
-    precision_floor: float = (
-        0.1  # K, room temperature sensor resolution  # C, building left to freeze
-    )
+    T_air_min: float = 5.0  # C, building left to freeze
+    precision_floor: float = 0.1  # K, room temperature sensor resolution
     T_air_max: float = 35.0  # C, grossly overheated
 
     # ---- Reward shaping ----
-    comfort_band: float = 1.0  # C, error at which tracking reward halves
-    energy_weight: float = 0.15  # relative to the [0,1] comfort term
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    comfort_band: float = 1.0  # C
+    # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
+    # A running cost is a real part of every one of these plants, but its
+    # weight against tracking accuracy is a design decision this library has
+    # not earned yet, and an arbitrary one turns a tracking benchmark into a
+    # multi-objective problem whose Pareto point nobody chose. The glass
+    # furnace showed the cost of getting it wrong: its MPC sat 6 K cold with
+    # fuel at minimum 80% of the time, because a 0.1 fuel weight against a
+    # quadratic tracking surrogate made that the optimum of the objective it
+    # was given. The field and the term stay, so a weight can be restored
+    # once there is a defensible way to set it. See docs/roadmap.md.
+    energy_weight: float = 0.0  # was 0.15, against the [0, 1] comfort term
 
     # ---- Initial conditions ----
     initial_T_range: Tuple[float, float] = (18.0, 22.0)
 
     # ---- Time discretization ----
     delta_t: float = 900.0  # s (15 min) -- standard building-simulation step
-    max_steps_in_episode: int = 672  # 7 days
+    max_steps_in_episode: int = 720  # 7.5 days at dt = 900 s
 
 
 @struct.dataclass

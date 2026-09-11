@@ -101,15 +101,25 @@ class PHParams(EnvParams):
     pK2: float = 10.25
 
     # ---- Operating / termination bounds ----
-    pH_min: float = 2.0
-    precision_floor: float = (
-        1e-2  # pH units, glass electrode resolution  # grossly acidic -- off spec
-    )
+    pH_min: float = 2.0  # grossly acidic -- off spec
+    precision_floor: float = 1e-2  # pH units, glass electrode resolution
     pH_max: float = 12.0  # grossly alkaline -- off spec
 
     # ---- Reward shaping ----
-    tracking_band: float = 1.0  # pH units at which tracking reward reaches 0
-    reagent_cost_weight: float = 0.05
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    tracking_band: float = 1.0  # pH units
+    # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
+    # A running cost is a real part of every one of these plants, but its
+    # weight against tracking accuracy is a design decision this library has
+    # not earned yet, and an arbitrary one turns a tracking benchmark into a
+    # multi-objective problem whose Pareto point nobody chose. The glass
+    # furnace showed the cost of getting it wrong: its MPC sat 6 K cold with
+    # fuel at minimum 80% of the time, because a 0.1 fuel weight against a
+    # quadratic tracking surrogate made that the optimum of the objective it
+    # was given. The field and the term stay, so a weight can be restored
+    # once there is a defensible way to set it. See docs/roadmap.md.
+    reagent_cost_weight: float = 0.0  # was 0.05
 
     # ---- Initial / target ranges ----
     # Targets sit around neutrality, which is where the titration curve is
@@ -121,7 +131,7 @@ class PHParams(EnvParams):
     # Residence time V/q_total ~ 88 s, so dt = 5 s gives ~18 steps per
     # residence time. 600 steps = 50 min ~ 34 residence times.
     delta_t: float = 5.0
-    max_steps_in_episode: int = 600
+    max_steps_in_episode: int = 300
 
 
 @struct.dataclass

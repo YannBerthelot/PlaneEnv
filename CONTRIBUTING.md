@@ -1,7 +1,8 @@
 # Contributing to TargetGym
 
-Contributions are welcome — bug reports, new environments, better baselines,
-or corrections to the physics.
+Contributions are welcome: bug reports, new environments, better baselines,
+or corrections to the physics. Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Setting up
 
@@ -15,7 +16,7 @@ uv run pre-commit install    # optional: runs the CI checks on each commit
 ## Running the checks
 
 ```bash
-make ci          # everything CI runs: ruff, black --check, fast tests
+make ci          # everything CI runs: ruff, black --check, docs, fast tests
 make test        # fast tests only, in parallel
 make test-all    # adds the slow closed-loop controller checks
 make mypy        # type-check the enforced modules
@@ -35,7 +36,8 @@ covers the closed-loop controller contracts, which run on merges to `main`
 rather than on every pull request.
 
 CI runs the fast suite against Python 3.11, 3.12, 3.13 and 3.14 in parallel,
-plus a lint job and, on merges to `main`, the slow suite on one interpreter.
+plus a lint job, a docs job (`make ci-docs`) and, on merges to `main`, the slow
+suite on one interpreter.
 If you add a dependency, check it resolves across that whole window --
 `uv lock --check --python 3.14` is the quickest way to find out. Note that
 `pygame` itself only ships wheels through 3.13, so on 3.14 the project pulls
@@ -44,13 +46,13 @@ If you add a dependency, check it resolves across that whole window --
 ## Style
 
 `ruff` and `black`, both enforced in CI and configured in `pyproject.toml`.
-`make format` applies both. The ruff rule set is deliberately narrow — real
-defects, import errors and import ordering — so that anything it reports is
+`make format` applies both. The ruff rule set is deliberately narrow (real
+defects, import errors and import ordering) so that anything it reports is
 worth acting on; the reasoning for what is excluded is in `pyproject.toml`
 next to the `select` list.
 
-`mypy` runs over a deliberately small set of modules -- the ones that pass
-today -- and CI enforces it. The rest of the tree does not pass, for a reason
+`mypy` runs over a deliberately small set of modules, the ones that pass
+today, and CI enforces it. The rest of the tree does not pass, for a reason
 recorded next to the config: the environments annotate `struct.dataclass`
 fields as `float` while holding traced JAX `Array` values, which is the
 ordinary flax idiom and produces hundreds of mismatches that are shorthand
@@ -59,7 +61,7 @@ list by making a module pass and adding it.
 
 Coverage sits above 90%, enforced at 89 by `make coverage` and on one CI
 column. It is a ratchet: raise it as coverage improves, never lower it to make
-a red build green. Nothing is excluded from the measurement -- the tuners and
+a red build green. Nothing is excluded from the measurement. The tuners and
 the figure runner are things users run, so leaving them out would measure a
 smaller library than the one that ships.
 
@@ -78,7 +80,7 @@ shape of an existing one such as `src/target_gym/boiler_drum/`:
 Then add an `EnvSpec` to `src/target_gym/registry.py`. That entry is what makes
 the environment real to the rest of the repo: `tests/test_env_conformance.py`
 parametrises **every** conformance test over the registry, so registering an
-environment immediately subjects it to the shared contracts — determinism,
+environment immediately subjects it to the shared contracts: determinism,
 observation and action space agreement, disturbances that behave like
 disturbances under a constant PRNG key, and a PID that beats the best constant
 action. Most defects in a new environment surface there before you write a
@@ -108,9 +110,34 @@ silently.
 
 Environments ship a PID and, where tractable, an MPC, so a learned policy has
 something real to beat. PID gains are tuned by `scripts/tune_pid.py` and cached
-in `data/pid_gains.json`. When the gradient-based MPC is unusable — the cement
-kiln's adjoint overflows through its transport delay — use the sampling
+in `data/pid_gains.json`. When the gradient-based MPC is unusable, as on the
+cement kiln whose adjoint overflows through its transport delay, use the sampling
 (CEM) MPC instead.
+
+### Re-recording the baselines
+
+How well each controller actually controls is measured by hand and committed,
+not measured in CI: a full run takes hours, nearly all of it in the aircraft,
+and the answer only moves when the physics, the controllers or their gains do.
+
+```bash
+uv run python scripts/record_baselines.py                  # everything
+uv run python scripts/record_baselines.py --envs plane cstr # just these
+```
+
+Each record carries a fingerprint of what determined it: the environment's
+modules, the shared controller and integration code, the gains, the parameter
+values. The suite refuses to read one whose fingerprint no longer matches
+the tree. So if you change any of those, a test will tell you which records went
+stale; re-record them and commit the result with the change that invalidated it.
+`src/target_gym/provenance.py` explains why the fingerprint is taken over source
+rather than over behaviour, and what that trade buys.
+
+Two things to know before starting a run. It reads `data/baseline_returns.json`
+and merges its results into whatever the file holds *at the time it writes*, so
+a second run started later will not clobber it, but two runs recording the same
+environment will still race, and the last one wins. And gains changes invalidate
+records, so tune first, record second.
 
 ## Documentation
 
@@ -121,12 +148,26 @@ trusted, by `tests/test_docs.py`:
 - **Every runnable example in `docs/` is executed.** A fenced `python` block
   runs unless its first line is `# doc: skip`. If you change a signature, the
   docs fail with the code.
-- **`docs/environments.md` is generated** from the registry by
-  `scripts/generate_env_reference.py`. Adding an environment or a baseline
-  means regenerating it; the test tells you when it is stale.
+- **The environment pages are generated** from the registry:
+  `docs/environments.md` by `scripts/generate_env_reference.py`, and the
+  per-environment pages under `docs/environments/` by
+  `scripts/generate_env_pages.py`. Adding an environment or a baseline means
+  regenerating both. `make ci-docs` runs each with `--check` and then
+  `mkdocs build --strict`, which fails on a dangling link, including one that
+  resolves on GitHub but not on the built site, since anything outside `docs/`
+  (a `PHYSICS.md` under `src/`, `CONTRIBUTING.md`) has to be linked absolutely.
 
-A new environment also needs a `PHYSICS.md`, which is likewise asserted -- the
-README's claim that every environment carries one is a test, not a hope.
+  Action meanings on those pages are read out of each environment class's
+  docstring, from a line like `Action (2,): [power, stick], raw in [-1, 1]`.
+  Write one, or the page shows bounds with a blank meaning. The generator will
+  not invent labels for you.
+
+  The gallery mosaics come from `scripts/make_gallery_mosaic.py`, which builds
+  its sets from the registry groups, so a new environment appears in its group's
+  mosaic once it has a clip under `videos/`.
+
+A new environment also needs a `PHYSICS.md`, and that is asserted too. The
+README's claim that every environment carries one is backed by a test.
 
 ## Pull requests
 

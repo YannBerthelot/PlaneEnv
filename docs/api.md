@@ -78,8 +78,31 @@ than users; that is not a promise about them.
 
 ## Versioning
 
-Semantic versioning. The version is derived from the git tag by
-`hatch-vcs`, so `target_gym.__version__` reflects the release you installed.
+Two things are versioned here, and they move independently.
 
-Before 1.0, the classifier in `pyproject.toml` says what maturity to expect,
-and it is kept honest rather than aspirational.
+### The package
+
+Semantic versioning. The version is derived from the git tag by `hatch-vcs`, so
+`target_gym.__version__` reflects the release you installed. The classifier in
+`pyproject.toml` says what maturity to expect and is kept honest rather than
+aspirational.
+
+### The environments
+
+Every environment carries a version, and `spec.versioned_name` gives the name a
+published result should cite: `plane-v1`, `cstr-v1`. Versioning starts at the
+0.6 release, where everything ships as `v1`. Nothing before that is versioned,
+because the package had no users and so no published numbers to keep meaningful.
+
+Registry keys stay unversioned, since they are an internal handle used for
+gains, recorded baselines and file paths. `REGISTRY["plane"]` is how you load
+it; `plane-v1` is what you cite.
+
+The version changes when the environment does: its dynamics, its reward, the
+parameters it is measured at, or its observation layout. Re-tuning a controller
+is not such a change, and does not bump anything.
+
+That promise is enforced rather than asserted. `data/env_versions.json` records
+the fingerprint each version was stamped at, and `tests/test_env_versions.py`
+fails when the tree no longer matches. So an environment cannot change under a
+name that has already been published against without CI saying so.

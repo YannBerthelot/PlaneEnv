@@ -21,6 +21,11 @@ from target_gym.utils import save_video
 
 
 class FourTank(environment.Environment[FourTankState, FourTankParams]):
+    """Quadruple-tank rig; the obvious loop pairing is non-minimum phase.
+
+    Action (2,): [pump 1 voltage, pump 2 voltage], raw in [-1, 1] -> [v_min, v_max]
+    """
+
     render_car = classmethod(_render)
     screen_width = 600
     screen_height = 400

@@ -120,9 +120,15 @@ LAMBDA_IODINE = 2.93e-5  # 1/s  (ln2 / (6.57 * 3600))
 # Xe-135 half-life: 9.14 hours → decay constant
 LAMBDA_XENON = 2.11e-5  # 1/s  (ln2 / (9.14 * 3600))
 
-# Number of piecewise-constant power setpoints per episode. Each segment has
-# equal duration; setpoints sampled uniformly from ``target_n_range`` at reset.
-N_SETPOINTS = 4
+# The demand is an Ornstein-Uhlenbeck process, not a schedule.
+#
+# A ``N_SETPOINTS = 4`` constant used to live here, with a paragraph describing
+# piecewise-constant setpoints of equal duration sampled at reset. The
+# environment never did that: ``compute_next_state`` evolves ``target_n`` as an
+# OU process, which is continuous load-following and a better model of what a
+# grid asks a reactor for than four 70% steps in twenty minutes would be. The
+# constant, the schedule array and ``get_target_from_schedule`` are all gone;
+# the state field went with them.
 
 
 @struct.dataclass
@@ -171,10 +177,8 @@ class ReactorParams(EnvParams):
     rho_Xe_full: float = 0.025  # = 2500 pcm
 
     # ---- Termination / safety bounds ----
-    n_min: float = 0.01
-    precision_floor: float = (
-        1e-4  # relative flux, ex-core detector resolution  # near-shutdown — SCRAM
-    )
+    n_min: float = 0.01  # near-shutdown — SCRAM
+    precision_floor: float = 1e-4  # relative flux, ex-core detector resolution
     n_max: float = 1.5  # 150 % overpower — SCRAM
     T_fuel_max: float = 1473.0  # K — well below UO2 melting (~3120 K)
     T_fuel_min: float = 500.0
@@ -183,7 +187,10 @@ class ReactorParams(EnvParams):
 
     # ---- Reward shaping ----
     rod_motion_weight: float = 0.02
-    reward_band: float = 0.03  # Gaussian tracking band (3% = tight)
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md. The reward
+    # has not been a Gaussian for some time; this is the planner's scale.
+    reward_band: float = 0.03  # relative flux (3% = tight)
 
     # ---- Demand (Ornstein-Uhlenbeck process) ----
     # Grid demand evolves as a mean-reverting random walk — the plant must
@@ -203,6 +210,10 @@ class ReactorParams(EnvParams):
     # ---- Initial / target ranges ----
     target_n_range: Tuple[float, float] = (0.3, 1.0)
     initial_n_range: Tuple[float, float] = (0.7, 1.0)
+    #: Recent power level the xenon inventory is in equilibrium with at reset.
+    #: Drawn independently of ``initial_n``, so the reactor starts with a poison
+    #: offset it has to trim rather than at equilibrium with itself.
+    initial_xenon_power_range: Tuple[float, float] = (0.6, 1.0)
     initial_T_fuel: float = 900.0
     initial_T_coolant: float = 580.0
 
@@ -235,10 +246,13 @@ class ReactorState(EnvState):
     Xe_hat: float  # normalised Xe-135 concentration
 
     target_n: float
-    target_schedule: jnp.ndarray  # (N_SETPOINTS,) — legacy, unused with OU demand
     demand_key: jnp.ndarray  # PRNGKey for reproducible OU noise
 
     rho_ext: float  # current (actual, rate-limited) rod reactivity
+    #: What the controller *asked* the rods for this step, before the rate
+    #: limit. Carried so the reward can charge for demanding motion the rods
+    #: cannot deliver; see ``compute_reward``.
+    rho_ext_cmd: float
 
 
 def steady_state_precursors(n_0: float, params: ReactorParams) -> jnp.ndarray:
@@ -260,18 +274,6 @@ def steady_state_xenon(n_0: float, params: ReactorParams) -> tuple[float, float]
         / (LAMBDA_XENON + params.sigma_phi0 * n_0)
     )
     return I_hat_eq, Xe_hat_eq
-
-
-def get_target_from_schedule(
-    target_schedule: jnp.ndarray, time: int, params: ReactorParams
-) -> jnp.ndarray:
-    """Select the active setpoint from a piecewise-constant schedule."""
-    # state.time and max_steps_in_episode are both in physics-step units.
-    slot = jnp.minimum(
-        (time * N_SETPOINTS) // params.max_steps_in_episode,
-        N_SETPOINTS - 1,
-    )
-    return target_schedule[slot]
 
 
 def compute_velocity(position, action, params: ReactorParams):
@@ -544,6 +546,7 @@ def compute_next_state(
             Xe_hat=new_Xe_hat,
             target_n=new_target,
             rho_ext=rho_ext,
+            rho_ext_cmd=desired_rho,
             time=new_time,
         ),
         metrics,
@@ -597,9 +600,10 @@ def compute_reward(state: ReactorState, params: ReactorParams, xp=jnp):
     docs/reward-shaping.md.
 
     ``step_env`` applies ``control_period`` physics sub-steps per environment
-    step and sums their rewards, so one step returns several times a single
-    sub-step value. Returns here are not on the same numeric scale as the other
-    environments; comparisons within this environment are unaffected.
+    step and returns their **mean**, so one env step is on the same numeric
+    scale as a step of any other environment. It used to sum them, which put
+    this plant's per-step reward near 4.7 where everything else caps around 1.0
+    and made returns misleading the moment they were read across environments.
 
     * Rod cost : small penalty for holding rods far from neutral.
     """
@@ -608,8 +612,19 @@ def compute_reward(state: ReactorState, params: ReactorParams, xp=jnp):
         error, params.precision_floor, params.n_max - params.n_min, xp
     )
 
+    # Charged for asking the rods to move faster than they can, not for where
+    # they are. The previous form was ``|rho_ext| / rho_scale``, which penalises
+    # holding the rods where the physics requires them: a reactor at 60% power
+    # *must* sit with rods inserted, and paying for that is paying for doing the
+    # job. This is the wind turbine's pitch-activity form -- command minus
+    # achieved, divided by the actuator's range -- and it is large exactly when
+    # the demand is running ahead of the rate limit. It rewards staying inside
+    # the achievable envelope, which given asymmetric rod speeds (insertion
+    # fast, withdrawal slow) is a real thing to have to plan around.
     rho_scale = xp.maximum(xp.abs(params.rho_ext_min), xp.abs(params.rho_ext_max))
-    rod_penalty = params.rod_motion_weight * xp.abs(state.rho_ext) / rho_scale
+    rod_penalty = (
+        params.rod_motion_weight * xp.abs(state.rho_ext_cmd - state.rho_ext) / rho_scale
+    )
 
     return tracking * (1.0 - rod_penalty)
 

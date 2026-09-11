@@ -35,16 +35,17 @@ SMOKE_TUNER_KWARGS = {
     "tune_plane3d_figure8_pid": {"n_targets": 2, "n_steps": 100},
 }
 
-# Three aircraft tuners return NaN gains. The mechanism is the one that was
-# found and fixed for the four-tank -- an operation whose forward value is fine
-# but whose reverse-mode derivative is NaN, which then poisons every gain -- but
-# the specific operation has not been localised for these, so they are pinned
-# rather than guessed at. strict=True means a fix flips them to passing.
-NAN_TUNERS = {
-    "tune_plane_pid",
-    "tune_plane3d_heading_pid",
-    "tune_plane3d_circle_pid",
-}
+# The aircraft tuners used to return NaN gains, and the mechanism is now known:
+# ``plane.dynamics.aero_coefficients`` wrote its stall blend as
+# ``CL_linear / (1 + exp(u))``. Past about 77 degrees of incidence the exponent
+# overflows float32, ``exp`` returns inf, and the reverse-mode derivative of
+# ``x / (1 + inf)`` is NaN even though the forward value is a perfectly good 0.
+# Any rollout long enough for the aircraft to depart reached that incidence, so
+# every gradient through it came back NaN. Written as ``jax.nn.sigmoid`` -- the
+# same function, evaluated stably -- all three pass, which is what this list
+# being empty records. It is kept, rather than deleted, because it is where the
+# next tuner of this kind would be pinned.
+NAN_TUNERS: set[str] = set()
 
 TUNERS = [
     "tune_first_order_pid",

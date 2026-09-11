@@ -23,6 +23,7 @@ from gymnax.environments import environment, spaces
 from target_gym.base import canonical_reset
 from target_gym.experts.pid import make_plane3d_heading_pid
 from target_gym.patrol.env import (
+    N_LEAD_LEGS,
     PatrolParams,
     PatrolState,
     check_is_terminal_patrol,
@@ -61,7 +62,7 @@ class _PlanePatrolBase(environment.Environment[PatrolState, PatrolParams]):
         return PatrolParams()
 
     # -- to be provided by subclasses --------------------------------------
-    def get_obs(self, state: PatrolState) -> jnp.ndarray:
+    def get_obs(self, state: PatrolState, params: PatrolParams = None) -> jnp.ndarray:
         raise NotImplementedError
 
     # -- core --------------------------------------------------------------
@@ -132,11 +133,14 @@ class _PlanePatrolBase(environment.Environment[PatrolState, PatrolParams]):
             minval=params.target_heading_range[0],
             maxval=params.target_heading_range[1],
         )
-        lead_turn_rate = jax.random.uniform(
+        # One turn rate per leg of the route, drawn once and cycled.
+        lead_turn_schedule = jax.random.uniform(
             turn_key,
+            shape=(N_LEAD_LEGS,),
             minval=params.lead_turn_rate_range[0],
             maxval=params.lead_turn_rate_range[1],
         )
+        lead_turn_rate = lead_turn_schedule[0]
 
         # Slot geometry (constant over the episode).
         slot_back = jax.random.uniform(
@@ -174,6 +178,7 @@ class _PlanePatrolBase(environment.Environment[PatrolState, PatrolParams]):
             slot_right=slot_right,
             slot_up=slot_up,
             lead_turn_rate=lead_turn_rate,
+            lead_turn_schedule=lead_turn_schedule,
             time=0,
         )
         slot_x, slot_y, slot_z = desired_slot_position(provisional)
@@ -268,7 +273,7 @@ class PlanePatrol(_PlanePatrolBase):
         super().__init__(integration_method)
         self.obs_shape = (26,)
 
-    def get_obs(self, state: PatrolState) -> jnp.ndarray:
+    def get_obs(self, state: PatrolState, params: PatrolParams = None) -> jnp.ndarray:
         return get_obs_full(state, xp=jnp)
 
 
@@ -288,5 +293,5 @@ class PlanePatrolBearingOnly(_PlanePatrolBase):
         super().__init__(integration_method)
         self.obs_shape = (21,)
 
-    def get_obs(self, state: PatrolState) -> jnp.ndarray:
+    def get_obs(self, state: PatrolState, params: PatrolParams = None) -> jnp.ndarray:
         return get_obs_bearing_only(state, xp=jnp)

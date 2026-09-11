@@ -19,6 +19,7 @@ from gymnax.environments import environment, spaces
 from target_gym.base import canonical_reset
 from target_gym.plane.dynamics import total_wind_3d
 from target_gym.plane3d.env import (
+    _RACETRACK_LEG,
     PlaneParams3D,
     PlaneState3D,
     check_is_terminal_3d,
@@ -26,9 +27,11 @@ from target_gym.plane3d.env import (
     compute_reward_circle,
     compute_reward_figure8,
     compute_reward_heading,
+    compute_reward_racetrack,
     get_obs_circle,
     get_obs_figure8,
     get_obs_heading,
+    get_obs_racetrack,
 )
 from target_gym.plane3d.rendering import _render
 from target_gym.utils import compute_norm_from_coordinates, save_video
@@ -127,10 +130,20 @@ class _Airplane3DBase(environment.Environment[PlaneState3D, PlaneParams3D]):
             params = self.default_params
         key, altitude_key, target_altitude_key = jax.random.split(key, 3)
 
-        initial_z = jax.random.uniform(
-            altitude_key,
-            minval=params.initial_altitude_range[0],
-            maxval=params.initial_altitude_range[1],
+        target_altitude = jax.random.uniform(
+            target_altitude_key,
+            minval=params.target_altitude_range[0],
+            maxval=params.target_altitude_range[1],
+        )
+        initial_z = jnp.clip(
+            target_altitude
+            + jax.random.uniform(
+                altitude_key,
+                minval=params.initial_altitude_offset_range[0],
+                maxval=params.initial_altitude_offset_range[1],
+            ),
+            params.initial_altitude_range[0],
+            params.initial_altitude_range[1],
         )
         initial_x_dot = params.initial_x_dot
         initial_y_dot = params.initial_y_dot
@@ -151,12 +164,6 @@ class _Airplane3DBase(environment.Environment[PlaneState3D, PlaneParams3D]):
         )
         initial_alpha = initial_theta - initial_gamma
         initial_psi = jnp.arctan2(initial_y_dot, initial_x_dot)
-
-        target_altitude = jax.random.uniform(
-            target_altitude_key,
-            minval=params.target_altitude_range[0],
-            maxval=params.target_altitude_range[1],
-        )
 
         base_kwargs = dict(
             x=0.0,
@@ -292,6 +299,98 @@ class Plane3DHeading(_Airplane3DBase):
 
 
 # ─── Circle task ───────────────────────────────────────
+
+
+class Plane3DRacetrack(_Airplane3DBase):
+    """
+    3D airplane: fly a racetrack holding pattern at a target altitude.
+
+    A hold is two straight legs joined by two 180 degree turns, which is what
+    "holding" means in aviation and the shape this library is named for. It
+    exercises heading-hold on the legs and a sustained coordinated turn on the
+    caps *in one task*, where Plane3DHeading and Plane3DCircle test those
+    separately -- and the transition between them, twice a lap, is where a
+    controller tuned for one regime shows what it costs in the other.
+
+    The aircraft starts on a straight leg, tracking along it.
+
+    Observation (21,):
+        [x_dot, y_dot, z, z_dot, theta, theta_dot, phi, phi_dot,
+         gamma, psi, target_altitude, rel_x, rel_y, target_radius,
+         target_heading, power, stick, aileron,
+         cross_track, tangent_heading, curvature]
+
+    Action (3,): [power, stick, aileron] each in [-1, 1]
+    """
+
+    obs_value_index: int = 2
+    # Declared, unlike the three tasks above it, only after its absence broke
+    # everything that rolls an episode out: ``runners.rollout`` reads it to
+    # know which observation carries the setpoint, so the tuner scored every
+    # candidate as -inf and ``scripts/record_baselines.py`` could not have
+    # recorded this environment at all.
+    obs_target_index: int = 10
+    tracked_names: tuple = ("altitude (m)",)
+    # Without this the renderer's getattr falls back to "heading", and the
+    # holding pattern is drawn as a straight dashed line -- a picture of a
+    # different task than the one being scored.
+    task_type: str = "racetrack"
+
+    def __init__(self, integration_method: str = "rk4_2", observe_wind: bool = False):
+        super().__init__(integration_method, observe_wind)
+        # 21: the circle's 18 plus target_heading and the two guidance values
+        # the pattern's geometry determines exactly. 23 with the wind sensor.
+        self.obs_shape = (23,) if observe_wind else (21,)
+
+    def compute_reward(self, state, params):
+        return compute_reward_racetrack(state, params)
+
+    def get_obs(self, state: PlaneState3D, params: PlaneParams3D = None):
+        return self._append_wind(get_obs_racetrack(state, xp=jnp), state, params)
+
+    @canonical_reset
+    def reset_env(self, key: chex.PRNGKey, params: PlaneParams3D = None):
+        if params is None:
+            params = self.default_params
+        key, base_kwargs = self._reset_common(key, params)
+        key, radius_key, heading_key, along_key = jax.random.split(key, 4)
+
+        target_radius = jax.random.uniform(
+            radius_key,
+            minval=params.target_radius_range[0],
+            maxval=params.target_radius_range[1],
+        )
+        # Orientation of the pattern, and where along the near leg to start.
+        pattern_heading = jax.random.uniform(heading_key, minval=0.0, maxval=2 * jnp.pi)
+        half_leg = target_radius * _RACETRACK_LEG
+        along = jax.random.uniform(along_key, minval=-half_leg, maxval=half_leg)
+
+        # Start on the leg at +radius abeam, heading along the pattern.
+        c, s_ = jnp.cos(pattern_heading), jnp.sin(pattern_heading)
+        start_x = along * c - target_radius * s_
+        start_y = along * s_ + target_radius * c
+
+        speed = compute_norm_from_coordinates(
+            jnp.array([base_kwargs["x_dot"], base_kwargs["y_dot"] + 1e-6])
+        )
+        x_dot = speed * c
+        y_dot = speed * s_
+
+        base_kwargs.update(
+            x=start_x,
+            y=start_y,
+            x_dot=x_dot,
+            y_dot=y_dot,
+            psi=jnp.arctan2(y_dot, x_dot),
+        )
+        state = PlaneState3D(
+            **base_kwargs,
+            target_x=0.0,
+            target_y=0.0,
+            target_radius=target_radius,
+            target_heading=pattern_heading,
+        )
+        return self.get_obs(state, params), state
 
 
 class Plane3DCircle(_Airplane3DBase):

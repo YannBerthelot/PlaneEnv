@@ -54,6 +54,16 @@ _SHARED_SOURCES = (
     _ROOT / "integration.py",
 )
 
+# Shared *physics*: what a learned policy's score depends on, which is a
+# narrower set. A learned policy never runs a PID or an MPC, so re-tuning a
+# controller must not invalidate a training run that cost GPU-hours -- but a
+# change to the integrator, or to the reward helper every environment scores
+# through, absolutely must.
+_PHYSICS_SOURCES = (
+    _ROOT / "utils.py",
+    _ROOT / "integration.py",
+)
+
 
 def _stable_ast_digest(source: str) -> str:
     """Hash a module's structure, ignoring comments, docstrings and formatting.
@@ -129,7 +139,14 @@ def _env_sources(spec) -> list[pathlib.Path]:
     directory = _ROOT.parent / pathlib.Path(*package.split("."))
     if not directory.is_dir():
         return []
-    return [p for p in sorted(directory.glob("*.py")) if p.name != "rendering.py"]
+    # Any rendering module, not just the one named exactly "rendering.py".
+    # Drawing code cannot change a return, so hashing it only produces false
+    # stales; the 2D aircraft's second renderer, rendering_console.py, was
+    # being hashed purely because the filter matched on an exact filename
+    # rather than on the role.
+    return [
+        p for p in sorted(directory.glob("*.py")) if not p.name.startswith("rendering")
+    ]
 
 
 def baseline_fingerprint(spec) -> str:
@@ -159,6 +176,39 @@ def baseline_fingerprint(spec) -> str:
     h.update(_digest_paths(_SHARED_SOURCES).encode())
     h.update(json.dumps(values, sort_keys=True).encode())
     h.update(json.dumps(gains, sort_keys=True).encode())
+    # Which parameters the planner zeroes for its own model. Not a parameter
+    # *value*, so ``values`` above does not see it, yet it decides whether the
+    # MPC plans on the mean disturbance or on one invented realisation of it --
+    # worth 350.4 against 151.8 on the battery. A record taken under one and
+    # read under the other is exactly the silent staleness this guards.
+    h.update(json.dumps(sorted(getattr(spec, "noise_fields", ()))).encode())
+    return h.hexdigest()[:16]
+
+
+def environment_fingerprint(spec) -> str:
+    """Everything a *learned* policy's score depends on.
+
+    Deliberately narrower than :func:`baseline_fingerprint`: it covers the
+    environment's own modules, the shared physics, and the parameter values, but
+    not the controllers. An agent never calls a PID, so re-tuning one should not
+    invalidate a training run that cost GPU-hours; changing the integrator or the
+    reward every environment scores through should.
+
+    Composed separately rather than by reusing the baseline digest, so that
+    adding this could not change any fingerprint already recorded in
+    ``data/baseline_returns.json``.
+    """
+    params = spec.make_test_params()
+    values = {
+        k: repr(v)
+        for k, v in sorted(vars(params).items())
+        if isinstance(v, (int, float, bool, str, tuple))
+    }
+    h = hashlib.sha256()
+    h.update(b"env-v1")
+    h.update(_digest_paths(_env_sources(spec)).encode())
+    h.update(_digest_paths(_PHYSICS_SOURCES).encode())
+    h.update(json.dumps(values, sort_keys=True).encode())
     return h.hexdigest()[:16]
 
 

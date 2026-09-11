@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import pytest
 
 from target_gym.glass_furnace.env import (
+    FUEL_DEAD_TIME_STEPS,
     N_REGEN_NODES,
     N_SETPOINTS,
     GlassFurnaceParams,
@@ -25,6 +26,8 @@ def _make_state(**overrides) -> GlassFurnaceState:
         target_T_crown=1587.0,
         target_schedule=jnp.full((N_SETPOINTS,), 1587.0),
         m_pull_disturbance=jnp.zeros(()),
+        T_crown_meas=1587.0,
+        fuel_pipeline=jnp.full((FUEL_DEAD_TIME_STEPS,), 0.6),
         fuel_flow=0.6,
         T_air_preheat=1250.0,
         T_stack=500.0,
@@ -127,9 +130,10 @@ def test_get_obs_matches_manual_call():
 def test_observation_hides_unmeasurable_states():
     """Only real plant instrumentation is observable.
 
-    obs = [T_crown, T_air_preheat, fuel_pct, reversal_phase, target_T_crown].
+    obs = [T_crown_meas, T_air_preheat, fuel_pct, reversal_phase, target].
     Glass-zone temperatures, the checker profile, the batch blanket mass and
-    the pull-rate disturbance are all hidden -- 6 of the 9 dynamic states.
+    the pull-rate disturbance are all hidden. The crown reading is the
+    *instrument*, which lags the true crown temperature.
     """
     env = GlassFurnace()
     sentinels = dict(

@@ -42,7 +42,7 @@ Everything here is checked against the closed-form solution
 | Step response reaches 63.2 % of final at t = τ | analytic | matches | ✅ |
 | Settles to `K·u` | analytic | matches | ✅ |
 | Time-constant resolution | ≥ 5 steps per τ | **10 steps** | ✅ |
-| Episode covers settling | ≥ 4 τ | **200 steps = 20 τ** | ✅ |
+| Episode covers settling | ≥ 4 τ | **100 steps = 10 τ** (benchmark; the class default of 200 is 20 τ) | ✅ |
 | Every target reachable | required | `u = x/K` needs 0.5–1.5 of ±2.0 | ✅ |
 | No overshoot from a step | first order cannot overshoot | none | ✅ |
 | Monotone step response | required | yes | ✅ |
@@ -67,8 +67,15 @@ that the four-tank environment failed, and it costs nothing to assert here.
 
 ## 4. Task design
 
-**Observation** `[x, target_x]`. **Reward** — a squared normalised tracking
-band. There is no disturbance, nothing hidden, and no irrecoverable state.
+**Observation** `[x, target_x]`. **Reward** — `log_scaled_reward` against the
+6.0 envelope with a floor at `precision_floor = 6e-3`, the same form the rest of
+the suite uses. It replaced a squared normalised band, which spent nearly all of
+its range on errors a controller had already closed.
+
+There is no disturbance, nothing hidden, and no irrecoverable state. The
+terminal guard on `|x| > 3` is unreachable: `x` is first-order toward `K·u`,
+which the action bounds cap at ±2, from a start inside ±0.5. This environment
+cannot end early, so its `mpc_terminated_early` is always 0.
 
 The environment exists so that a new algorithm, wrapper or integration method
 can be checked against something with a known answer before being pointed at a
@@ -86,3 +93,24 @@ that an algorithm will work on a real process.
 deterministic given the sampled setpoint, and linear. It shares none of the
 properties — partial observability, irrecoverable states, non-minimum phase,
 transport delay — that the rest of the suite exists to pose.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `first_order` | 100 | 0.05 | 5 s | 1 in [-1, 1] | 2 | 3 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

@@ -142,6 +142,112 @@ def rollout(spec, params, policy: Callable, seed: int = 0):
     return np.array(values), np.array(targets), np.array(rewards)
 
 
+def baseline_policy(spec, kind: str, params=None) -> Callable | None:
+    """A shipped baseline as one uniform ``(obs, state) -> action`` callable.
+
+    Both kinds take the same two arguments and return the same type, so a
+    single evaluation loop serves either, and a learned policy written to the
+    same shape drops straight in beside them.
+
+    The asymmetry underneath is deliberate and is *why* both signatures carry
+    both arguments rather than each taking what it happens to need. **The PID
+    ignores ``state``**: it reads the observation, as a plant controller does.
+    **The MPC ignores ``obs``**: it reads the true state, because it is
+    presented as a full-state upper bound rather than as a peer to a policy
+    that sees only what a plant instruments. Two different call shapes made
+    that easy to miss, and a benchmark whose ceiling quietly sees more than its
+    contestants is worth being loud about.
+
+    ``kind`` is ``"pid"`` or ``"mpc"``. Returns ``None`` when the environment
+    does not ship that baseline, which for the MPC is the two patrol variants.
+    """
+    if kind == "pid":
+        if not spec.has_pid:
+            return None
+        pid = spec.make_pid()
+        if hasattr(pid, "reset"):
+            pid.reset()
+        call = pid if callable(pid) else pid.step
+        return lambda obs, state=None: np.atleast_1d(call(obs))
+
+    if kind == "mpc":
+        if not spec.has_mpc:
+            return None
+        params = spec.make_test_params() if params is None else params
+        mpc = spec.make_mpc(spec.make_env(), params)
+        mpc.reset()
+        return lambda obs, state: np.atleast_1d(mpc.step(obs, state))
+
+    raise ValueError(f"kind must be 'pid' or 'mpc', not {kind!r}")
+
+
+def rollout_mpc_batch(spec, params, n_seeds: int):
+    """Run ``n_seeds`` MPC episodes at once, vmapped over the seed axis.
+
+    Only for ``GradientMPC``: its ``_optimize(actions_init, state)`` is already a
+    pure function of its two arguments, the warm start being the only thing the
+    object carries between steps, so it vmaps as it stands. The CasADi planners
+    cannot follow -- IPOPT is a solver outside JAX -- and are parallelised by
+    process instead.
+
+    This is the whole reason the recording was slow. Seeds are independent by
+    construction: different PRNG key, no shared state, ``reset()`` between them.
+    Running them one after another left thirteen of fourteen cores idle while
+    ``plane_energy`` took two hours.
+
+    Returns ``(values, targets, rewards, terminated)``: the first three with a
+    leading seed axis, matching what :func:`rollout` returns for one, and a
+    boolean per seed saying whether it ended early. Termination is tracked
+    rather than inferred from zero-padded rewards, because a legitimate reward
+    can be zero and ``mpc_terminated_early`` is a published field.
+    """
+    env = spec.make_env()
+    from target_gym.experts.mpc import plan_params
+
+    mpc = spec.make_mpc(env, plan_params(spec, params))
+    value_idx = _as_tuple(env.obs_value_index)
+    target_idx = _as_tuple(env.obs_target_index)
+    n_steps = int(params.max_steps_in_episode)
+
+    keys = jnp.stack([jax.random.PRNGKey(s) for s in range(n_seeds)])
+    obs, state = jax.jit(jax.vmap(env.reset_env, in_axes=(0, None)))(keys, params)
+    actions = jnp.zeros((n_seeds, mpc.horizon, mpc.action_dim))
+
+    optimize = jax.jit(jax.vmap(mpc._optimize, in_axes=(0, 0)))
+    step = jax.jit(jax.vmap(env.step_env, in_axes=(0, 0, 0, None)))
+
+    values, targets, rewards = [], [], []
+    alive = jnp.ones((n_seeds,), dtype=bool)
+    ended = jnp.zeros((n_seeds,), dtype=bool)
+    for _ in range(n_steps):
+        values.append(obs[:, list(value_idx)])
+        targets.append(obs[:, list(target_idx)])
+        # Shift the warm start by one and repeat the last action, exactly as
+        # ``GradientMPC.step`` does for a single episode.
+        actions = optimize(
+            jnp.concatenate([actions[:, 1:], actions[:, -1:]], axis=1), state
+        )
+        u = actions[:, 0]
+        if mpc.action_dim == 1:
+            u = u[:, 0]
+        obs, state, reward, terminated, _ = step(keys, state, u, params)
+        # A seed that has terminated stops earning. Its state keeps being
+        # stepped because the batch runs in lockstep, which is why the reward
+        # has to be masked rather than the loop broken.
+        rewards.append(jnp.where(alive, reward, 0.0))
+        ended = ended | (alive & terminated)
+        alive = alive & jnp.logical_not(terminated)
+        if not bool(jnp.any(alive)):
+            break
+
+    return (
+        np.asarray(jnp.stack(values, axis=1)),
+        np.asarray(jnp.stack(targets, axis=1)),
+        np.asarray(jnp.stack(rewards, axis=1)),
+        np.asarray(ended),
+    )
+
+
 def constant_policy(value, env, params) -> Callable:
     """A policy holding *value*, expressed as a fraction of the action range.
 
@@ -169,11 +275,22 @@ def pid_policy(spec) -> Callable | None:
 
 def mpc_policy(spec, env, params) -> Callable | None:
     """The registered MPC baseline, reset and ready."""
+    from target_gym.experts.mpc import plan_params
+
     if not spec.has_mpc:
         return None
-    mpc = spec.make_mpc(env, params)
+    mpc = spec.make_mpc(env, plan_params(spec, params))
     mpc.reset()
-    return lambda obs, state: np.atleast_1d(mpc.step(obs, state))
+
+    def policy(obs, state):
+        return np.atleast_1d(mpc.step(obs, state))
+
+    # The planner itself, so a caller can read its solver health afterwards.
+    # Without this the controller is captured in a closure and unreachable, and
+    # a CasADi baseline could be recorded from solves that never converged.
+    # mypy does not model attributes on function objects, hence the ignore.
+    policy.controller = mpc  # type: ignore[attr-defined]
+    return policy
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +310,7 @@ def figure_sweep(name: str, params=None, resolution: int = 9, plot: bool = True)
     """Constant-action sweep: what the plant does open-loop, across its range."""
     spec = REGISTRY[name]
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
     levels = np.linspace(-1.0, 1.0, resolution)
 
     runs = [rollout(spec, params, constant_policy(u, env, params))[0] for u in levels]
@@ -226,7 +343,7 @@ def figure_pid(name: str, params=None, n_seeds: int = 6, plot: bool = True):
     if not spec.has_pid:
         return None
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
 
     policy = pid_policy(spec)
     assert policy is not None  # guarded by has_pid above
@@ -252,11 +369,124 @@ def figure_pid(name: str, params=None, n_seeds: int = 6, plot: bool = True):
     return runs
 
 
+#: Playback rate for the gallery clips. Ten, not the 30 the GIF was written at.
+#: These are heavily time-lapsed already -- a 3D aircraft episode is 800 s of
+#: flight -- so the constraint is legibility, not smoothness.
+GIF_FPS = 10
+
+
+_MEDIA_MIN_STEPS = 600
+_MEDIA_MAX_STEPS = 1200
+
+#: Environments whose motion is meant to be read as motion, and the clip's
+#: playback speed for them.
+#:
+#: For these the clip shows the *opening* of an episode at a fixed speed-up
+#: rather than a whole episode time-lapsed. An aircraft episode is 800 s of
+#: flight; squeezed into a 200-frame clip at 10 fps it played at forty times
+#: real time, which reads as an aerobatic display rather than an airliner on
+#: 8 km lobes. Ten seconds of flight per second of playback is fast enough to
+#: show a full turn and slow enough that the attitude changes are legible.
+#:
+#: The process environments deliberately keep the full-episode time-lapse.
+#: Their subject is a setpoint change playing out over twenty minutes or six
+#: hours, and the first ten seconds of one says nothing at all. The point of a
+#: gallery clip is to convey the task, and for those the task *is* the whole
+#: episode.
+_MEDIA_REALTIME_GROUPS = ("plane", "patrol")
+MEDIA_SPEEDUP = 10.0
+MEDIA_SECONDS = 10.0
+
+
+def _media_params(spec):
+    """Parameters for a figure or a video: the environment as registered.
+
+    These used to be ``spec.params_cls()`` -- the bare dataclass defaults --
+    which quietly rendered something other than the registered environment.
+    ``plane_steps`` and ``plane_sine`` differ from ``plane`` only through
+    ``EnvSpec.test_params``, so with the defaults all three produced the same
+    clip, byte-identical down to a total reward of 9783.414.
+
+    Episode length is the one exception. The benchmark caps it to bound the cost
+    of measuring, and a 280-step clip is over before anything has happened, so
+    media keeps the environment's own longer default there.
+    """
+    params = spec.make_test_params()
+    steps = int(params.max_steps_in_episode)
+    default_steps = int(spec.params_cls().max_steps_in_episode)
+    # Long enough to be worth watching, short enough to stay readable: the
+    # aircraft's own default is 10 000 steps, which is 41 cycles of the sinusoid
+    # and unwatchable, while the benchmark's 280 is over before the climb ends.
+    #
+    # Take the longer of the two lengths, *then* bound it. This used to read
+    # ``min(max(steps, MIN), default_steps, MAX)``, which applied the floor and
+    # then let ``default_steps`` undo it: every environment whose own default is
+    # under 600 got a clip shorter than the floor exists to prevent. The CSTR
+    # default is 100, so its clip was 100 steps, which at the renderer's stride
+    # is five frames. The committed gallery still holds an 80-frame CSTR clip
+    # from before this regressed, so the shipped videos and the code that makes
+    # them had silently stopped agreeing.
+    target = int(np.clip(max(steps, default_steps), _MEDIA_MIN_STEPS, _MEDIA_MAX_STEPS))
+    if target != steps:
+        params = params.replace(max_steps_in_episode=target)
+    return params
+
+
+def _clip_params(spec):
+    """Parameters for a gallery clip, which is not the same as for a figure.
+
+    A figure wants the whole episode: it is a record of what the controller did
+    from start to finish. A clip wants whatever length reads best as a moving
+    picture, and for the environments in ``_MEDIA_REALTIME_GROUPS`` that is a
+    short opening at a fixed speed rather than the episode compressed to fit.
+    """
+    params = _media_params(spec)
+    if not spec.name.startswith(_MEDIA_REALTIME_GROUPS):
+        return params
+    # One rendered frame per simulated step, so the speed-up is delta_t times
+    # the frame rate and the length is however many steps fill MEDIA_SECONDS of
+    # playback. The renderer's own frame_stride comes out at ``stride`` for
+    # this length, which is what makes the arithmetic hold.
+    dt = float(getattr(params, "delta_t", 1.0))
+    stride = max(1, round(MEDIA_SPEEDUP / (dt * GIF_FPS)))
+    steps = int(round(MEDIA_SECONDS * GIF_FPS * stride))
+
+    # A task whose setpoint moves needs the clip to contain a change, or it
+    # shows an aircraft holding a level and says nothing about what is being
+    # asked of it. Ten times real time covers 100 s; a level lasts 300 s. So
+    # the clip is lengthened to two of them and the speed-up rises to suit --
+    # the aircraft is pinned mid-panel in these views and has no attitude to
+    # misread, which is what made a fast time-lapse unwatchable on the 3D tasks.
+    pattern = int(getattr(params, "target_pattern", 0))
+    overrides = {}
+    if pattern == 1:
+        # The ladder's tread is the episode divided by ``target_steps``, so
+        # simply shortening the episode would compress the schedule and show a
+        # faster sequence of levels than the environment ever asks for. Scaling
+        # ``target_steps`` with the clip keeps each tread the length it really
+        # has, and the clip is then a window onto the task rather than a
+        # different one.
+        spec_params = spec.make_test_params()
+        tread = float(spec_params.max_steps_in_episode) / max(
+            float(getattr(spec_params, "target_steps", 1.0)), 1.0
+        )
+        steps = max(steps, int(round(2.0 * tread)))
+        overrides["target_steps"] = max(1, int(round(steps / tread)))
+    elif pattern in (3, 4):
+        # The sinusoid and the chirp are written against ``target_period`` in
+        # seconds, so they keep their shape whatever the episode length.
+        period = float(getattr(params, "target_period", 0.0))
+        if period > 0:
+            steps = max(steps, int(round(2.0 * period / dt)))
+
+    return params.replace(max_steps_in_episode=steps, **overrides)
+
+
 def figure_comparison(name: str, params=None, n_seeds: int = 5, plot: bool = True):
     """Cumulative return of the best constant action, the PID and the MPC."""
     spec = REGISTRY[name]
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _media_params(spec)
 
     # Bracketing constants rather than a fine sweep: the point of the bar is
     # that the baselines beat open loop, not to find the optimal constant.
@@ -320,6 +550,36 @@ def _save(fig, stem: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def retime_gif(path: str, fps: int = GIF_FPS) -> str:
+    """Rewrite a GIF's frame delays in place, leaving the frames alone.
+
+    Duration is frames over fps, and only one of those costs anything. Adding
+    frames grows the file linearly and permanently, since these live in git
+    history; slowing the playback is free. Measured on a plane clip, 46 frames
+    re-timed from 33 fps to 10 went from 1.4 s to 4.6 s for the same bytes.
+
+    Done here rather than in ``utils.save_video`` deliberately. ``utils`` is
+    hashed into both ``provenance`` fingerprints, so editing it would mark all
+    nineteen recorded baselines and all twenty-one environment version stamps
+    stale to change a frame delay. This module is in neither.
+    """
+    from PIL import Image, ImageSequence
+
+    with Image.open(path) as im:
+        frames = [f.copy() for f in ImageSequence.Iterator(im)]
+    if not frames:
+        return path
+    frames[0].save(
+        path,
+        save_all=True,
+        append_images=frames[1:],
+        duration=int(round(1000 / max(fps, 1))),
+        loop=0,
+        optimize=True,
+    )
+    return path
+
+
 def video(name: str, params=None, seed: int = 0) -> str | None:
     """Render one PID episode to ``videos/<name>/pid_output.gif``."""
     spec = REGISTRY[name]
@@ -327,15 +587,21 @@ def video(name: str, params=None, seed: int = 0) -> str | None:
     if policy is None:
         return None
     env = spec.make_env()
-    params = params or spec.params_cls()
+    params = params or _clip_params(spec)
     folder = f"{VIDEO_DIR}/{name}"
     os.makedirs(folder, exist_ok=True)
-    written = env.save_video(policy, seed, params=params, folder=folder, format="gif")
+    # FPS=30, matching the rate ``utils.save_video`` passes to ``write_gif``.
+    # Left at its default of 60 the clip is built at 60 and written at 30, and
+    # moviepy drops every other frame -- a 100-step clip came out 49 frames, so
+    # the speed-up was quietly double what the length arithmetic above says.
+    written = env.save_video(
+        policy, seed, params=params, folder=folder, format="gif", FPS=30
+    )
     # save_video names its output episode_000.gif; the gallery and
     # scripts/shorten_gifs.py both expect pid_output.gif.
     final = os.path.join(folder, "pid_output.gif")
     os.replace(written, final)
-    return final
+    return retime_gif(final)
 
 
 # ---------------------------------------------------------------------------

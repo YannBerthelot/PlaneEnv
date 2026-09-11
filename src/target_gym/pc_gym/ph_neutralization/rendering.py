@@ -189,4 +189,4 @@ def render_ph(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_ph, HISTORY_KEYS, stride=4)
+_render = rk.make_render_hook(render_ph, HISTORY_KEYS)

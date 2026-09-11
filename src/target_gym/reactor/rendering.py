@@ -669,12 +669,22 @@ def render_reactor(state, params, step, history):
 
 
 # -- save_video hook -----------------------------------------------------------
-def _render(cls, screen, state, params, frames, clock, stride: int = 48):
+def _render(cls, screen, state, params, frames, clock, stride: int | None = None):
     """Render hook used by ``save_video`` -- subsamples frames by *stride*.
 
-    stride=48 because episodes are 86 400 steps (24 hours at 1.0 s/step).
-    Produces ~1 800 frames at 60 fps → ~30 s video.
+    The stride is derived from the episode via ``render_kit.frame_stride``
+    rather than fixed. It was pinned at 48, chosen for the 86 400-step day-long
+    episode, but ``runners._media_params`` caps a clip at 1 200 steps, so the
+    stride was 72x too coarse for the episode actually being rendered and a
+    whole reactor clip came out as two frames.
     """
+    from target_gym.reactor.env_jax import CONTROL_PERIOD
+    from target_gym.render_kit import frame_stride
+
+    if stride is None:
+        # ``state.time`` advances by a whole control period here, so the stride
+        # has to be expressed in those units or it lands between calls.
+        stride = frame_stride(params, time_step=CONTROL_PERIOD)
     if state is None:
         if cls.state is None:
             raise ValueError("No state provided")

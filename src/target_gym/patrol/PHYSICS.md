@@ -65,7 +65,7 @@ definition depends on.
 | Slot error is zero when the follower is at the slot | exact | `test_slot_error_zero_at_slot` |
 | Commanded slot lies behind the lead | negative along-track offset | `test_desired_slot_offset_is_behind_lead` |
 | Reward approaches 1 in the slot and aligned | ≈ 1 | `test_reward_near_one_in_slot` |
-| Collision terminates and is penalised | `-max_steps_in_episode` | `test_collision_terminates_with_penalty` |
+| Collision terminates, and is paid for by forfeit | reward stays in [0, 1]; the episode's remaining steps are lost | `test_collision_terminates_with_penalty` |
 | Losing formation terminates | at `max_slot_error` | `test_lost_formation_terminates` |
 | The shipped expert holds formation through a turn | across sampled turn rates | `test_expert_holds_formation` |
 | The expert never collides | separation > `min_separation` | `test_expert_never_collides` |
@@ -160,3 +160,25 @@ baseline that completes half its seeds is a weaker bar than it appears.
 the follower, including through a collision. Formation flight against a lead
 that reacts (a break turn, a station change) is a different and harder task,
 and is not modelled.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `patrol` | 200 | 1 | 3 min | 3 in [-1, 1] | 26 | 15 |
+| `patrol_bearing_only` | 200 | 1 | 3 min | 3 in [-1, 1] | 21 | 15 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

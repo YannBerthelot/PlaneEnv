@@ -4,7 +4,6 @@ import pytest
 
 from target_gym.reactor.env import (
     N_GROUPS,
-    N_SETPOINTS,
     ReactorParams,
     ReactorState,
     steady_state_precursors,
@@ -26,9 +25,9 @@ def _make_state(params=None, **overrides) -> ReactorState:
         I_hat=I_hat_eq,
         Xe_hat=Xe_hat_eq,
         target_n=0.8,
-        target_schedule=jnp.full((N_SETPOINTS,), 0.8),
         demand_key=jax.random.PRNGKey(42),
         rho_ext=jnp.zeros(()),
+        rho_ext_cmd=0.0,
     )
     defaults.update(overrides)
     return ReactorState(**defaults)

@@ -150,7 +150,7 @@ harder raises pressure, which *compresses* bubbles and lowers the level.
 | Three-element PID | 215 – 296 | 2.7 – 7.3 cm | 0.01 – 0.05 bar |
 | best constant action | 5.0 | trips in 5 – 117 steps | — |
 
-Throughput ≈ 10.8 M steps/s.
+Throughput is measured in [docs/performance.md](../../docs/performance.md).
 
 **Three-element control is the right PID baseline**, and its structure is the
 point: feedwater tracks *measured steam flow* as a feedforward, closing the
@@ -198,3 +198,24 @@ are the least defensible numbers in the table.
 **⚠️ D5 — level is linear in volume.** `A_d` is constant, which is right for
 deviations around normal water level and wrong for large excursions in a
 cylindrical drum. Trips at ±25 cm keep the model inside the linear region.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `boiler_drum` | 400 | 2 | 13 min | 2 in [-1, 1] | 7 | 10 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

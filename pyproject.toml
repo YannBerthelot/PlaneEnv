@@ -18,7 +18,7 @@ keywords = [
     "simulation",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -27,7 +27,20 @@ classifiers = [
 # The upper bound is a tested ceiling, not caution: it is the newest Python the
 # dependency set resolves and passes against. CI runs every version in this
 # window, so widening it means adding a column to that grid.
-requires-python = ">=3.11,<3.15"
+# Upper bound tracks gymnax, not jax.
+#
+# gymnax 1.0.0 is its latest release and declares requires-python <3.14, so it
+# will not install on 3.14 at all. It also caps jax<0.7, which holds jaxlib at
+# 0.6.x, and that is the version with no cp314 wheel. Declaring <3.15 here let
+# uv resolve a 3.14 interpreter and then fail with "Distribution jaxlib==0.6.2
+# ... doesn't have a source distribution or wheel for the current platform",
+# which is a confusing way to say the Python is too new.
+#
+# jaxlib itself has shipped cp314 since 0.10.1 and is now at 0.11.1, so upgrading
+# jax is not the blocker and raising this bound on that basis would not work.
+# Every environment here is a gymnax environment, so the trigger to raise it is
+# gymnax supporting 3.14 and lifting its jax cap.
+requires-python = ">=3.11,<3.14"
 
 dependencies = [
     # gymnax >= 1.0 is required, not merely preferred: the envs implement
@@ -104,6 +117,16 @@ dev = [
     { include-group = "lint" },
     { include-group = "agent" },
     "pre-commit>=3.5.0",
+    # scripts/record_baselines.py sizes its worker pool against available
+    # memory: one planner per core exhausted RAM and sent the machine
+    # swapping, which looked like CPU contention and is not.
+    "psutil>=5.9",
+]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.26",
+    "pymdown-extensions>=10",
 ]
 
 [tool.uv.sources]

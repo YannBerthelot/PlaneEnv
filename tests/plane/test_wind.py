@@ -38,7 +38,7 @@ def _final_alt_2d(env, params, n=300):
 
 class TestBackwardCompatible:
     def test_default_no_wind_obs_shape_2d(self):
-        assert Plane().obs_shape == (9,)
+        assert Plane().obs_shape == (10,)
 
     def test_default_no_wind_obs_shape_3d(self):
         assert Plane3D().obs_shape == (15,)
@@ -100,7 +100,7 @@ class TestObservability:
         env = Plane(observe_wind=True)
         params = PlaneParams(wind_x=-20.0, wind_z=3.0, **FIXED)
         obs, _ = env.reset_env(jax.random.PRNGKey(0), params)
-        assert obs.shape == (11,)
+        assert obs.shape == (12,)
         assert np.allclose(np.array(obs[-2:]), [-20.0, 3.0])
 
     def test_observable_appends_wind_3d(self):

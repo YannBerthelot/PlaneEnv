@@ -114,7 +114,7 @@ feed concentrations and flows jointly against the published benchmark.
 knows its own valve position. It does not have an on-line assay of carbonate
 speciation, so `Wa`, `Wb` and the buffer flow are hidden.
 
-**Reward** `clip(1 − |err|/tracking_band, 0, 1)² − reagent_cost_weight·q3_norm`.
+**Reward** `log_scaled_reward(|err|, precision_floor, envelope) − reagent_cost_weight·q3_norm`, with `reagent_cost_weight = 0` for the 0.6 line so the reward scores tracking alone. The reagent term stays wired; see the roadmap item on framing running cost.
 
 ---
 
@@ -126,8 +126,10 @@ speciation, so `Wa`, `Wb` and the buffer flow are hidden.
 | PID | 258.0 | 0.085 pH |
 | constant valve | 7.3 | 0.885 pH |
 
-Throughput ≈ 2.1 M steps/s — the bisection dominates, and is the price of
-having the nonlinearity be exact rather than approximated.
+The bisection dominates the step cost, and is the price of having the
+nonlinearity be exact rather than approximated. Its step count was cut from 44
+to 20 on measurement, which roughly doubled throughput; see
+[docs/performance.md](../../../docs/performance.md).
 
 **The MPC objective is a quadratic in the error, not a copy of the reward.**
 This is worth stating because getting it wrong failed in *both* directions
@@ -153,3 +155,24 @@ rather than one.
 
 **⚠️ D3 — flows are exact.** No valve dynamics, hysteresis or flow measurement
 error on the manipulated stream.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `ph_neutralization` | 300 | 5 | 25 min | 1 in [-1, 1] | 3 | 6 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

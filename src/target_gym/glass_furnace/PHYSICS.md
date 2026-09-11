@@ -14,7 +14,8 @@ Status: ✅ validated · ⚠️ defensible but approximate · ❌ known deviatio
 
 ## 1. Model scope
 
-Eleven ODE states plus one algebraic variable:
+Eleven ODE states, a thermocouple lag and a two-step fuel pipeline, plus one
+algebraic variable:
 
 | State | Meaning | Timescale |
 |---|---|---|
@@ -23,6 +24,8 @@ Eleven ODE states plus one algebraic variable:
 | `T_work` | glass in the working end (hidden) | ~30 h |
 | `T_rA[4]`, `T_rB[4]` | regenerator checker nodes, hot end first (hidden) | ~1–2 h |
 | `m_batch` | unmelted batch blanket on the melt (hidden) | ~1 h |
+| `T_crown_meas` | crown thermocouple reading — **what the observation reports** | 120 s |
+| `fuel_pipeline[2]` | fuel commanded but not yet burning (hidden) | 60 s |
 | `T_gas` *(algebraic)* | flame / combustion-space gas | ~0.5 s |
 
 **`T_gas` is solved to steady state, not integrated.** Its radiative time
@@ -81,7 +84,7 @@ merely plausible-looking.
 | `AFR` | 17.0 | – | Stoichiometric air/fuel mass ratio for methane | ✅ |
 | `excess_air` | 0.10 | – | 10 %, typical for glass furnaces | ✅ |
 | `c_p_air` / `c_p_gas` | 1150 / 1200 | J/(kg·K) | Hot air / flue gas | ✅ |
-| `fuel_min` / `fuel_max` | 0.50 / 0.68 | kg/s | Sized from the measured 1861 °C·s/kg gain so the action range spans the 1427–1677 °C operating band plus failure margin | ✅ |
+| `fuel_min` / `fuel_max` | 0.513 / 0.698 | kg/s | Sized from the measured 1861 °C·s/kg gain so the action range spans the 1427–1677 °C operating band plus failure margin, then raised 2.6 % so the burners deliver the same time-averaged heat despite the reversal interruption | ✅ |
 
 ### Regenerators
 | Symbol | Value | Unit | Source | |
@@ -90,6 +93,12 @@ merely plausible-looking.
 | `C_regen_node` | 3.0e7 | J/K | Thermally active checker layer | ⚠️ |
 | `eps_regen_node` | 0.80 | – | Per-node effectiveness; TUNED to hit air-preheat and stack targets jointly | ⚠️ |
 | `reversal_period` | 1500 | s | 25 min, typical float furnace | ✅ |
+| `reversal_dead_time` | 40 | s | Firing interrupted while the valves change over | ⚠️ |
+| `reversal_firing_floor` | 0.05 | – | Pilots stay lit through the changeover | ⚠️ |
+| `tau_thermocouple` | 120 | s | Crown element in a refractory sheath | ⚠️ |
+| `FUEL_DEAD_TIME_STEPS` | 2 | steps | 60 s: gas train, air adjustment, flame development | ⚠️ |
+| `charge_period` / `charge_duty` | 300 / 0.30 | s / – | Reciprocating batch charger cycle | ⚠️ |
+| `charge_mass_jitter` | 0.15 | – | Dose-to-dose mass variation | ⚠️ |
 
 ### Glass and batch
 | Symbol | Value | Unit | Source | |
@@ -125,10 +134,50 @@ range, a seed whose draws clustered scored 4413 with 6 °C mean error while one
 with a 146 °C swing scored 734 with 37 °C. Narrowing the band cut PID return
 variance from ±1067 to ±286 and mean tracking error from 26.6 °C to 2.5 °C.
 
-**Reward.** `clip(1 - |err|/tracking_scale, 0, 1)² - fuel_cost_weight·fuel_norm`
-with `tracking_scale = 40 °C`. Normalising by the full 250 °C operating span
-scored a 20 °C miss at 0.85, so the reward barely separated good control from
-bad inside the reachable band.
+**Setpoint schedule.** Five slots, and the schedule is a *trim walk*: the first
+slot is the level the furnace is already being held at, and each later slot is
+the previous one plus at most ±6 °C, clipped to the band. Independent draws
+from the band, which is what this did before, span about 30 °C on average and
+can step 40 °C between consecutive slots — the opposite of the ±10–20 °C trim
+the band was chosen to represent. The walk gives an 8 °C median span across an
+episode with single trims of 2.8 °C median, 6 °C worst. Reset places the crown
+within ±4 °C of the first slot for the same reason: a running furnace is found
+at its setpoint, not 18 °C off it.
+
+**Reward.** `log_scaled_reward(|err|, precision_floor, 250 °C) -
+fuel_cost_weight·fuel_norm`. Every halving of the error is worth the same
+increment, from the operating envelope down to the 1 °C the crown thermocouple
+resolves, so the reward keeps separating controllers exactly where a good one
+operates: 1 °C scores 0.875, 2 °C scores 0.801, 4 °C scores 0.709. It replaced
+a clipped square, `clip(1 - |err|/40, 0, 1)²`, which was flat at zero for any
+error beyond 40 °C and so gave no gradient where it was most needed. See
+`docs/reward-shaping.md`.
+
+**Instrumentation and dead time.** The crown reading in the observation is
+``T_crown_meas``, a first-order lag of ``tau_thermocouple`` = 120 s on the true
+crown temperature: the element sits in a refractory sheath and reports a
+filtered version of what it is in. Fuel carries a pure transport delay of
+``FUEL_DEAD_TIME_STEPS`` = 2 steps, 60 s, covering the gas train, the
+combustion-air adjustment behind it and flame development. The reward scores
+the true crown temperature; the instrument is the controller's problem.
+
+Neither existed before, and their absence was not a detail. Inertia is not dead
+time: a first-order plant with no transport delay has no bandwidth limit, so a
+PID can be tuned arbitrarily tight against it. One duly held the crown to
+0.078 K mean against a 10 K open-loop drift, roughly thirty times better than a
+real furnace is held, and the task had no headroom left for anything to beat.
+With the lag in place the same PID holds 0.46-0.83 K, and dead time is the
+specific thing a predictive controller handles better by planning through it.
+
+**Batch charging is discrete.** The doser fires for ``charge_duty`` = 30 % of
+each ``charge_period`` = 300 s, with the dose mass varying +/-15 % cycle to
+cycle, and the rate is averaged over the step so the mass is conserved exactly
+whatever ``delta_t`` is. It used to be a continuous stream tied to the pull
+rate, with the only load variation an AR(1) drift on pull at a 50 min
+correlation time -- slower than the plant, and a slow smooth load is precisely
+what integral action cancels perfectly. Pulsed charging puts content at the
+charger frequency instead, which the loop has to reject rather than integrate
+away. Open-loop crown swing went from 10 K to 23 K.
 
 **Reset** starts from a *consistent operating point* — offsets measured from
 the settled steady state at nominal firing — not arbitrary temperatures. A
@@ -157,7 +206,18 @@ realistic band rather than the middle.
 **⚠️ D2 — reversal is symmetric and lossless.** Real reversal briefly
 interrupts firing and causes a measurable crown temperature dip every 25 min.
 Here the changeover is instantaneous, so the disturbance it injects is milder
-than reality.
+than reality. This is now the largest remaining gap for *control*: it is a
+periodic upset at a known frequency, and the phase is observable, so it is
+exactly the disturbance a predictive controller can feed forward and a PID
+cannot.
+
+**⚠️ D4 — cullet ratio is fixed.** Batch is a mix of raw materials and recycled
+glass, and cullet melts with roughly 2.5 % less energy per 10 % of the charge.
+Real plants see it move by tens of percent as supply changes, usually without
+measuring it well. That is a *gain* disturbance -- it changes how much crown
+temperature a kilogram of gas buys -- and gain variation is the thing integral
+action does not fix, unlike the additive load disturbances this model does
+carry. Omitting it makes the plant more linear than the real one.
 
 **⚠️ D3 — single lumped firing rate.** An end-port furnace fires through
 alternating ports with a spatially varying heat release; this model has one
@@ -196,3 +256,24 @@ The refinement costs ~5× throughput and lands beside the plane — comfortably
 above the reactor, which the library already ships. Buying this much fidelity
 was affordable precisely because the furnace started as the cheapest non-trivial
 environment in the library.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `glass_furnace` | 1600 | 30 | 13.3 h | 1 in [-1, 1] | 5 | 26 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

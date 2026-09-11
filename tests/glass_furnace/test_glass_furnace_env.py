@@ -63,6 +63,13 @@ def _run_to_steady(fuel_raw, params=None, hours=140.0):
         _, state, _, terminated, _ = _jstep(key, state, action, p)
         if bool(terminated):
             break
+    # Stop at a fully firing step. The burners are interrupted for 40 s at every
+    # reversal, so a furnace sampled at an arbitrary step can be caught with its
+    # flame out: the gas is then cooler than the crown and the instantaneous
+    # specific energy is a quarter of the real figure. Neither says anything
+    # about steady operation, which is what these checks are about.
+    while float(state.fuel_flow) < p.fuel_min and not terminated:
+        _, state, _, terminated, _ = _jstep(key, state, action, p)
     return state, bool(terminated), p
 
 
@@ -263,7 +270,12 @@ def test_state_advances_under_each_integrator(method, params):
         integration_method=method,
     )
     assert new_state.time == state.time + 1
-    assert params.fuel_min <= float(new_state.fuel_flow) <= params.fuel_max
+    # ``fuel_flow`` is what is *delivered*, which is what a gas meter reads and
+    # what the observation reports, so the reversal changeover can take it below
+    # ``fuel_min`` for a step or two. The action mapping itself still respects
+    # the range: the commanded flow enters the pipeline inside it.
+    assert 0.0 <= float(new_state.fuel_flow) <= params.fuel_max
+    assert params.fuel_min <= float(new_state.fuel_pipeline[-1]) <= params.fuel_max
     assert new_state.T_rA.shape == (N_REGEN_NODES,)
     for leaf in jax.tree_util.tree_leaves(new_state):
         assert np.all(np.isfinite(np.asarray(leaf)))
@@ -275,7 +287,9 @@ def test_action_is_clipped_to_the_fuel_range(params):
         new_state, _ = compute_next_state(
             fuel_raw=raw, state=state, params=params, key=jax.random.PRNGKey(0)
         )
-        assert float(new_state.fuel_flow) == pytest.approx(expected, rel=1e-5)
+        # The command enters the pipeline; ``fuel_flow`` is what is delivered
+        # now, which is what was commanded two steps ago.
+        assert float(new_state.fuel_pipeline[-1]) == pytest.approx(expected, rel=1e-5)
 
 
 def test_reward_peaks_on_target(params):
@@ -289,12 +303,26 @@ def test_reward_peaks_on_target(params):
 
 
 def test_fuel_costs_reward(params):
-    """Burning more fuel must reduce reward at equal tracking."""
+    """Fuel is priced into the reward only when ``fuel_cost_weight`` says so.
+
+    It is zero for the 0.6 line, so the reward scores tracking alone and this
+    asserts the two are equal. The term is still wired, so raising the weight
+    restores the trade, which is what the roadmap item on framing running cost
+    is for. Asserting it both ways keeps the wiring covered either way.
+    """
     lean = _state(
         params, target_T_crown=1580.0, T_crown=1580.0, fuel_flow=params.fuel_min
     )
     rich = lean.replace(fuel_flow=params.fuel_max)
-    assert float(compute_reward(lean, params)) > float(compute_reward(rich, params))
+    if float(params.fuel_cost_weight) == 0.0:
+        assert float(compute_reward(lean, params)) == pytest.approx(
+            float(compute_reward(rich, params))
+        )
+    else:
+        assert float(compute_reward(lean, params)) > float(compute_reward(rich, params))
+
+    priced = params.replace(fuel_cost_weight=0.1)
+    assert float(compute_reward(lean, priced)) > float(compute_reward(rich, priced))
 
 
 def test_terminal_on_crown_out_of_bounds(params):

@@ -1199,14 +1199,38 @@ def _controller_defaults(gains_key):
 
     import target_gym.experts.pid as pid_mod
 
-    if gains_key != "plane_cascaded":
-        return None
-    sig = inspect.signature(pid_mod.StatefulCascadedAltitudePID.__init__)
-    return {
-        name: float(prm.default)
-        for name, prm in sig.parameters.items()
-        if name not in ("self", "dt") and isinstance(prm.default, (int, float))
-    }
+    if gains_key == "plane_cascaded":
+        sig = inspect.signature(pid_mod.StatefulCascadedAltitudePID.__init__)
+        return {
+            name: float(prm.default)
+            for name, prm in sig.parameters.items()
+            if name not in ("self", "dt") and isinstance(prm.default, (int, float))
+        }
+    if gains_key == "plane3d_racetrack":
+        # Read them off the controller the factory builds rather than
+        # restating the numbers, which live as ``_g3d`` fallbacks in
+        # ``make_plane3d_racetrack_cascaded_pid``. Restating them here would
+        # be a second copy that silently stops matching.
+        #
+        # Only the two proportional gains are searched. The integral and
+        # derivative terms ship at zero, and coordinate descent multiplies, so
+        # zero stays zero however many passes it runs. Seeding them at some
+        # invented nonzero value would be choosing a controller rather than
+        # tuning the one that ships, which is a separate change and needs its
+        # own before-and-after.
+        lateral = pid_mod.make_plane3d_racetrack_cascaded_pid().lateral
+        return {
+            "track": {
+                "Kp": float(lateral.Kp_track),
+                "Ki": float(lateral.Ki_track),
+                "Kd": float(lateral.Kd_track),
+            },
+            "bank": {
+                "Kp": float(lateral.Kp_bank),
+                "Kd": float(lateral.Kd_bank),
+            },
+        }
+    return None
 
 
 def _flat_paths(d, prefix=()):
@@ -1236,9 +1260,15 @@ def _set_path(d, path, value):
 
 
 def _tune_aircraft_search(
-    env_name, gains_key, seeds=3, steps=400, passes=2, verbose=True, **kw
+    env_name, gains_key, seeds=3, steps=400, passes=2, verbose=True, hold=(), **kw
 ):
-    """Coordinate descent on the shipped controller's own gains."""
+    """Coordinate descent on the shipped controller's own gains.
+
+    ``hold`` names dotted gain paths the search may not move, for gains whose
+    right value is set by something the episode return cannot see. Descending
+    the return is the whole method, so a gain the return is indifferent to,
+    or actively wrong about, has to be excluded rather than argued with.
+    """
     import numpy as np
 
     import target_gym.experts.pid as pid_mod
@@ -1272,7 +1302,7 @@ def _tune_aircraft_search(
     best, best_score = start, score(start)
     if verbose:
         print(f"  baseline return {best_score:.2f}")
-    paths = list(_flat_paths(start))
+    paths = [p for p in _flat_paths(start) if ".".join(p) not in set(hold)]
     for p in range(passes):
         for path in paths:
             current = _get_path(best, path)
@@ -1323,6 +1353,29 @@ TUNERS = {
             _e, _k, **kw
         ),
         "Plane3DFigureEight",
+    ),
+    # Scored over the full 900 steps rather than the 400 the others use. A lap
+    # of this pattern is about 300 s, so 400 steps is one lap and a third: it
+    # would tune the acquisition and barely see the hold, which is the part
+    # that is not working.
+    #
+    # The roll loop is held, and this is the interesting part. Left free, the
+    # search stiffens it (Kp_bank -2.0 -> -4.0) and *removes* damping
+    # (Kd_bank -1.5 -> -0.75), because nothing in the reward objects to how the
+    # aircraft is banked. Measured over five seeds, that buys 340.6 of return
+    # against 319.0 while taking the achieved bank from 35.7 to 48.2 deg
+    # against a 30 deg command limit, and it makes the actual tracking *worse*
+    # (0.54 km of cross-track against 0.31 km). The whole improvement here is
+    # in the cross-track gain: Kp_track alone takes the settled error from
+    # 3.02 km to 0.31 km. An autopilot that overshoots its own bank limit by
+    # two thirds is not a credible expert whatever it scores, which is the
+    # judgement already recorded in ``_RacetrackLateral``'s docstring, so the
+    # search is not offered the choice.
+    "plane3d_racetrack": (
+        lambda n_points=0, tuning_rule="", _k="plane3d_racetrack", _e="plane3d_racetrack", **kw: _tune_aircraft_search(
+            _e, _k, steps=900, seeds=5, hold=("bank.Kp", "bank.Kd"), **kw
+        ),
+        "Plane3DRacetrack",
     ),
 }
 

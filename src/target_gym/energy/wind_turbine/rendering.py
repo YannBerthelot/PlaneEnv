@@ -14,6 +14,23 @@ from target_gym.energy.wind_turbine.env import compute_reward
 HISTORY_KEYS = ("t", "power", "target", "omega", "pitch", "wind", "reward")
 
 
+# NREL 5 MW blade planform, normalised as (r/R, chord/R). The reference blade
+# is 61.5 m long with a 4.65 m maximum chord at about a quarter span, tapering
+# to roughly 1.4 m at the tip -- so chord/R peaks near 0.074 and the blade is
+# slender. The previous drawing was a triangle at chord/R = 0.37, widest at the
+# root and pointed at the tip, which is the shape of a paper dart and the
+# reverse of a blade.
+_PLANFORM = (
+    (0.04, 0.022),
+    (0.12, 0.055),
+    (0.25, 0.074),
+    (0.45, 0.060),
+    (0.65, 0.046),
+    (0.85, 0.031),
+    (1.00, 0.010),
+)
+
+
 def _draw_turbine(ax, state, params):
     omega_rpm = float(state.omega) * 60.0 / (2.0 * np.pi)
     pitch = float(state.pitch)
@@ -36,41 +53,64 @@ def _draw_turbine(ax, state, params):
         )
     rk.label(ax, 0.11, cy + R * 0.95, f"WIND  {v:.1f} m/s", color=rk.CYAN, size=8)
 
-    # Tower and nacelle.
-    ax.plot(
-        [cx, cx], [0.04, cy], color=rk.FRAME, lw=6, solid_capstyle="round", zorder=2
+    # Ground, so the tower stands on something rather than stopping in mid-air.
+    ax.axhspan(0.0, 0.045, color=rk.PANEL, zorder=0)
+    ax.axhline(0.045, color=rk.FRAME, lw=1.2, zorder=1)
+
+    # Tower: tapered, wider at the base. A constant-width line read as a stub
+    # because it was drawn in the hairline colour on a near-black ground.
+    base_w, top_w = 0.020, 0.009
+    ax.fill(
+        [cx - base_w, cx + base_w, cx + top_w, cx - top_w],
+        [0.045, 0.045, cy, cy],
+        color=rk.lerp_hex(rk.FRAME, rk.DIM, 0.45),
+        zorder=2,
     )
+
+    # Nacelle, *behind* the rotor. This is a head-on view, so the nacelle is
+    # mostly hidden by the hub -- the previous drawing put a rounded box 0.14
+    # wide across a 0.30 rotor radius in front of everything, which is the
+    # black rectangle that dominated the panel.
     ax.add_patch(
         rk.patches.FancyBboxPatch(
-            (cx - 0.055, cy - 0.035),
-            0.14,
-            0.07,
-            boxstyle=rk.patches.BoxStyle("Round", pad=0.012),
+            (cx - 0.032, cy - 0.020),
+            0.064,
+            0.040,
+            boxstyle=rk.patches.BoxStyle("Round", pad=0.008),
             fc=rk.PANEL,
             ec=rk.FRAME,
-            lw=1.6,
-            zorder=4,
+            lw=1.0,
+            zorder=2,
         )
     )
 
-    # Rotor. Blade angle animates with rotor position; blade *chord* narrows as
-    # pitch feathers, which is what spilling power looks like.
+    # Rotor. Blade angle animates with rotor position; the *projected* chord
+    # narrows as pitch feathers, which is what spilling power looks like
+    # head-on -- a fully feathered blade turns its edge to the viewer.
     phase = (float(state.time) * float(state.omega) * 0.02) % (2 * np.pi)
     feather = rk.clamp01(pitch / max(params.pitch_max, 1e-9))
     blade_c = rk.duty_hex(feather, rk.TEXT, rk.AMBER)
+    chord_scale = (1.0 - 0.80 * feather) + 0.06
     for k in range(3):
         a = phase + k * 2 * np.pi / 3
-        tipx, tipy = cx + R * np.cos(a), cy + R * np.sin(a)
-        w = 0.055 * (1.0 - 0.72 * feather) + 0.010
-        px, py = -np.sin(a) * w, np.cos(a) * w
-        ax.fill(
-            [cx + px, cx - px, tipx],
-            [cy + py, cy - py, tipy],
-            color=blade_c,
-            alpha=0.85,
-            zorder=3,
-        )
-    rk.disc(ax, cx, cy, 0.028, fc=rk.WELL, ec=rk.FRAME, zorder=6)
+        span = np.array([np.cos(a), np.sin(a)])
+        chord = np.array([-np.sin(a), np.cos(a)])
+        hub = np.array([cx, cy])
+        lead, trail = [], []
+        for frac, c in _PLANFORM:
+            mid = hub + span * (R * frac)
+            half = R * c * chord_scale
+            # The leading edge is the nearly straight one; the trailing edge
+            # carries the taper. Splitting the chord 35/65 about the pitch axis
+            # is what gives a blade its recognisable outline.
+            lead.append(mid + chord * half * 0.35)
+            trail.append(mid - chord * half * 0.65)
+        pts = np.array(lead + trail[::-1])
+        ax.fill(pts[:, 0], pts[:, 1], color=blade_c, alpha=0.9, zorder=3)
+
+    # Spinner over the blade roots.
+    rk.disc(ax, cx, cy, 0.026, fc=rk.PANEL, ec=rk.DIM, zorder=6)
+    rk.disc(ax, cx, cy, 0.010, fc=rk.WELL, ec=rk.FRAME, zorder=7)
     rk.glow(
         ax,
         cx,
@@ -84,7 +124,7 @@ def _draw_turbine(ax, state, params):
     rk.label(
         ax,
         cx,
-        0.04 - 0.035,
+        0.020,
         f"{omega_rpm:.2f} rpm   pitch {pitch:.1f} deg",
         color=rk.TEXT,
         size=9,
@@ -192,4 +232,4 @@ def render_wind_turbine(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_wind_turbine, HISTORY_KEYS, stride=8)
+_render = rk.make_render_hook(render_wind_turbine, HISTORY_KEYS)

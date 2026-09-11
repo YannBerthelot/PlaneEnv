@@ -178,4 +178,4 @@ def render_cstr(state, params, step, history):
     return rk.finish(fig), history
 
 
-_render = rk.make_render_hook(render_cstr, HISTORY_KEYS, stride=10)
+_render = rk.make_render_hook(render_cstr, HISTORY_KEYS)

@@ -125,7 +125,7 @@ setback 17 °C. Recovery from setback takes hours against a 43 h time constant,
 so a controller that waits for the setpoint step is already late. This is the
 structural gap MPC exploits and PID cannot close.
 
-**Reward** `clip(1 − |err|/(2·comfort_band), 0, 1)² − energy_weight·(Q/Q_max)`.
+**Reward** `log_scaled_reward(|err|, precision_floor, envelope) − energy_weight·(Q/Q_max)`, with `energy_weight = 0` for the 0.6 line so the reward scores comfort alone. The energy term stays wired and raising the weight restores the trade; see the roadmap item on framing running cost.
 The clip matters: without it the quadratic turns back upward past
 `2·comfort_band` and *rewards* large errors — a bug that made the first MPC
 stop heating entirely.
@@ -145,6 +145,16 @@ only the daily cycle plus noise.
 **⚠️ D2 — no cooling.** Heating only, so summer operation and the
 cooling/heating changeover are out of scope. Over-heating is penalised but
 cannot be corrected except by backing off the heat.
+
+**The 35 °C trip is still reachable only through the actuator**, which was
+worth checking, because a terminal state the controller has no authority over
+would be unlike every other trip in this suite. Peak free gain is 5.6 kW --
+4.8 kW of solar through the glazing plus 0.8 kW of occupancy -- against a heat
+loss coefficient of 159.4 W/K, so the *steady* rise above outdoor would be
+35 K, which on a 10 °C afternoon points at 45 °C. It never gets there: solar is
+zero for twelve hours a day and the 43 h thermal mass integrates, so with the
+heater held fully off the zone peaks at 21.6 to 24.2 °C across seeds. Reaching
+the trip requires the heater, so it is the controller's to avoid.
 
 **⚠️ D3 — solar gain ignores orientation and shading.** A single glazing area
 with one sinusoidal profile; a real zone has orientation-dependent gains and
@@ -170,6 +180,29 @@ recovery and coasting on forecast solar rather than reacting to it. It accepts
 slightly looser comfort (1.72 vs 1.38 °C MAE) for a large energy saving, which
 is exactly the trade the reward asks for.
 
-Throughput: **17.7 M steps/s** — two differential states with closed-form
-algebraic nodes make this one of the cheapest environments in the library,
-second only to CSTR.
+**Cheap to step**: one differential state with closed-form algebraic nodes,
+which is what the 5R1C reduction buys. See
+[docs/performance.md](../../../docs/performance.md) for measured throughput --
+it depends on the machine and the batch size, so it is measured in one place
+rather than claimed in fifteen.
+
+---
+
+<!-- BEGIN GENERATED FACTS -->
+
+<!-- Written by scripts/generate_physics_facts.py. Do not edit by hand:
+     `make ci-docs` fails if this block does not match the code. Prose
+     about *why* these numbers are what they are belongs outside it. -->
+
+### Facts, generated from the code
+
+| environment | steps | `delta_t` (s) | episode | action | obs | float state |
+| --- | --- | --- | --- | --- | --- | --- |
+| `hvac` | 720 | 900 | 180.0 h | 1 in [-1, 1] | 7 | 9 |
+
+`float state` counts the scalar and array float fields the state carries,
+`time` excluded; the gap between it and `obs` is what the controller cannot
+see. Episode lengths are `EnvSpec.test_params`, which is what the recorded
+baselines use.
+
+<!-- END GENERATED FACTS -->

@@ -1,31 +1,63 @@
-# TargetGym documentation
+---
+hide:
+  - toc
+---
 
-JAX reinforcement learning environments for **target MDPs** -- tasks where the
-objective is to reach and hold a subset of the state space against
-disturbances, not to reach a goal and stop. Holding a setpoint, forever, is
-what industrial control actually is.
+# TargetGym
 
-| | |
-|---|---|
-| **[Getting started](getting-started.md)** | Install, run an episode, plug into Gymnasium or a JAX training loop |
-| **[Environment reference](environments.md)** | All eighteen: shapes, tracked variables, baselines, physics contracts |
-| **[Public API](api.md)** | What is stable, what is not, and what changes at 1.0 |
-| **[Baselines](baselines.md)** | The shipped PID and MPC controllers, and how to tune them |
-| **[Reward shaping](reward-shaping.md)** | Why the tracking rewards have the shape they do, with the measurements |
-| **[Model review checklist](model-review-checklist.md)** | Eleven checks derived from real defects, and what they find across the environments |
-| **[Physics methodology](PHYSICS_METHODOLOGY.md)** | How each environment's physics is sourced, validated and bounded |
-| **[Contributing](../CONTRIBUTING.md)** | Tests, style, and what adding an environment involves |
+<p align="center">
+  <b>Reach a setpoint. Hold it forever. Against disturbances.</b><br/>
+  Twenty-two JAX environments for <i>target MDPs</i>, the control problems industry actually has.
+</p>
 
-## What makes these environments different
+<p align="center">
+  <img src="videos/mosaic_flagship.webp" width="100%"/><br/>
+  <sub>One from each family, held on setpoint by its shipped PID baseline.</sub>
+</p>
 
-Every environment's physics is a **documented, tested contract** rather than a
-claim. Each carries a `PHYSICS.md` beside its module giving a sourced parameter
-table, published validation targets that the test suite asserts, and quantified
-known deviations from the literature. A deviation that cannot be fixed today is
-recorded and pinned with a strict xfail, so fixing it later fails loudly
-instead of passing unnoticed.
+**21 environments**: 9 aircraft, 5 process control, 5 industrial / energy, 2 renewable energy. Every one of them is in the
+[gallery](environments.md), with its own page, clip and baseline numbers.
 
-They also target the failure modes that make real control hard:
+---
+
+```bash
+pip install target-gym
+```
+
+Or try it in the browser: [Colab quickstart](https://colab.research.google.com/github/YannBerthelot/TargetGym/blob/main/notebooks/quickstart.ipynb).
+
+```python
+import jax
+import numpy as np
+from target_gym import Plane, PlaneParams
+from target_gym.registry import REGISTRY
+
+env, params = Plane(), PlaneParams()
+obs, state = env.reset(jax.random.PRNGKey(0), params)
+
+# Every environment ships a tuned expert, so a learned policy
+# has something real to beat.
+pid = REGISTRY["plane"].make_pid()
+pid.reset()
+
+for t in range(200):
+    action = np.atleast_1d(pid(obs))
+    obs, state, reward, terminated, truncated, info = env.step(
+        jax.random.PRNGKey(t), state, action, params
+    )
+    if terminated or truncated:
+        break
+```
+
+[Browse the twenty-one environments →](environments.md){ .md-button .md-button--primary }
+[Getting started →](getting-started.md){ .md-button }
+
+---
+
+## Why these environments
+
+Holding a setpoint forever breaks differently than reaching a goal once, and
+these are the failure modes that come with it:
 
 | | |
 |---|---|
@@ -36,6 +68,37 @@ They also target the failure modes that make real control hard:
 | **Multi-timescale** | Millisecond neutronics against hour-long xenon; sub-second flame gas against 30 h glass residence |
 | **Finite budgets** | A battery whose tracking *now* costs the ability to track later |
 
-Every environment ships a PID baseline and most also ship an MPC, so a learned
-policy has something real to beat -- and where a baseline is missing, the
-registry records why.
+Every environment ships a tuned PID, and nineteen of twenty-one also ship an MPC,
+so a learned policy has something real to beat. And **where a baseline is weak,
+the docs say how weak**.
+
+## Documentation
+
+<div class="grid cards" markdown>
+
+- **Use it**
+
+    [Getting started](getting-started.md) ·
+    [Environments](environments.md) ·
+    [API reference](api.md)
+
+- **Beat the baselines**
+
+    [Baselines](baselines.md) ·
+    [RL protocol](rl-protocol.md) ·
+    [RL results](rl-baselines.md)
+
+- **Trust the numbers**
+
+    [Physics methodology](PHYSICS_METHODOLOGY.md) ·
+    [Model review checklist](model-review-checklist.md) ·
+    [Reward shaping](reward-shaping.md) ·
+    [Testing](testing.md)
+
+- **Contribute**
+
+    [Contributing](https://github.com/YannBerthelot/TargetGym/blob/main/CONTRIBUTING.md) ·
+    [Roadmap and known gaps](roadmap.md) ·
+    [Functional structure](functional-structure.md)
+
+</div>

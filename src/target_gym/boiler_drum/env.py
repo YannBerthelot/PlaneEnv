@@ -69,7 +69,7 @@ STEAM_OU_THETA = 5.0e-3
 @struct.dataclass
 class BoilerDrumParams(EnvParams):
     delta_t: float = 2.0
-    max_steps_in_episode: int = 1_800  # 1 hour
+    max_steps_in_episode: int = 400  # 800 s at dt = 2 s
 
     # -- geometry (Astrom & Bell P16-G16, Oresundsverket 160 MW unit) --------
     V_t: float = 88.0  # m3   total water + steam volume
@@ -118,14 +118,26 @@ class BoilerDrumParams(EnvParams):
     # -- task -----------------------------------------------------------------
     target_pressure_range: Tuple[float, float] = (82.0, 88.0)
     initial_level_range: Tuple[float, float] = (-0.05, 0.05)
-    level_band: float = 0.10  # m    tracking band for the reward
-    pressure_band: float = 2.0  # bar
+    # Error scale for the MPC's tracking term, not read by ``compute_reward``.
+    # See "Why the MPC does not minimise the reward" in docs/baselines.md.
+    level_band: float = 0.10  # m
+    pressure_band: float = 2.0  # bar, likewise
     level_trip: float = 0.25  # m    carryover / dryout, both irrecoverable
     pressure_min: float = 65.0
     level_precision_floor: float = 1e-3  # m, drum level transmitter
-    pressure_precision_floor: float = 0.05  # bar, pressure transmitter  # bar
+    pressure_precision_floor: float = 0.05  # bar, pressure transmitter
     pressure_max: float = 105.0  # bar
-    fuel_weight: float = 0.05
+    # Zeroed for the 0.6 line: this phase scores setpoint tracking alone.
+    # A running cost is a real part of every one of these plants, but its
+    # weight against tracking accuracy is a design decision this library has
+    # not earned yet, and an arbitrary one turns a tracking benchmark into a
+    # multi-objective problem whose Pareto point nobody chose. The glass
+    # furnace showed the cost of getting it wrong: its MPC sat 6 K cold with
+    # fuel at minimum 80% of the time, because a 0.1 fuel weight against a
+    # quadratic tracking surrogate made that the optimum of the objective it
+    # was given. The field and the term stay, so a weight can be restored
+    # once there is a defensible way to set it. See docs/roadmap.md.
+    fuel_weight: float = 0.0  # was 0.05
 
 
 @struct.dataclass

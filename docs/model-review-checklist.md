@@ -474,7 +474,8 @@ model, which here is all seven CasADi ones. None had this comparison before.
   episode. The circle is the instructive case: at 14.3 open-loop time constants
   it passed every settling-based check comfortably while being scored over
   **0.76 of a single lap**. Benchmark episodes now satisfy
-  `N >= max(10 * tau_actuator, 3 * T_period)`; six were below it and were
+  `N >= max(10 * tau_actuator, 1 * T_period)`, where a settling time exists;
+  six were below it and were
   lengthened. See the episode-length section of docs/rl-protocol.md.
 - ~~The reward-shaping phase should apply checks 1 and 2 to every environment
   with a band or tolerance parameter.~~ Done: all eighteen now share one

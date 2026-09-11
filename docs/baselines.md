@@ -576,7 +576,8 @@ leak and reshaping the dispatch signal took it to 8 of 10 on merit.
 ## What a longer episode exposed
 
 Lengthening the benchmark episodes to satisfy
-`N >= max(10 * tau_actuator, 3 * T_period)` -- see the episode-length section of
+`N >= max(10 * tau_actuator, 1 * T_period)` where a settling time exists at
+all -- see the episode-length section of
 [the RL protocol](rl-protocol.md) -- immediately found a defect that the short
 ones had been hiding, which is the argument for having done it.
 

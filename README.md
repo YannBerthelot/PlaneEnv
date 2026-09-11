@@ -8,6 +8,7 @@
 <p align="center"><i>Reach the target. Then hold it.</i></p>
 
 <p align="center">
+  <a href="https://yannberthelot.github.io/TargetGym/"><img alt="Documentation" src="https://img.shields.io/badge/docs-yannberthelot.github.io%2FTargetGym-blue"></a>
   <a href="https://pypi.org/project/target-gym/"><img alt="PyPI" src="https://img.shields.io/pypi/v/target-gym?color=blue"></a>
   <a href="https://pypi.org/project/target-gym/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/target-gym"></a>
   <a href="https://github.com/YannBerthelot/TargetGym/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/YannBerthelot/TargetGym/python-app.yml?branch=main&label=tests"></a>
@@ -268,7 +269,10 @@ method and lists what each model is validated against.
 | **[Model review checklist](docs/model-review-checklist.md)** | Thirteen checks for any plant model |
 | **[Testing](docs/testing.md)** | Suite organisation |
 
-Full index: **[docs/](docs/index.md)**.
+Rendered with search and navigation at
+**[yannberthelot.github.io/TargetGym](https://yannberthelot.github.io/TargetGym/)**.
+The links above point at the Markdown in this repository, which reads on
+GitHub and is rewritten for the site at build time.
 
 ---
 

@@ -1,6 +1,6 @@
 # Cement Kiln
 
-<p align="center"><img src="../videos/cement_kiln/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/cement_kiln/pid_output.gif" width="480px"/></p>
 
 Cement rotary kiln — 1-D axial model with counter-current gas.
 

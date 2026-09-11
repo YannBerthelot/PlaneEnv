@@ -1,6 +1,6 @@
 # Wind Turbine
 
-<p align="center"><img src="../videos/wind_turbine/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/wind_turbine/pid_output.gif" width="480px"/></p>
 
 Wind turbine — NREL 5 MW reference turbine, collective-pitch power regulation.
 

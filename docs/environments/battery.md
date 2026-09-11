@@ -1,6 +1,6 @@
 # Battery
 
-<p align="center"><img src="../videos/battery/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/battery/pid_output.gif" width="480px"/></p>
 
 Grid battery storage — equivalent-circuit Li-ion pack tracking a dispatch signal.
 

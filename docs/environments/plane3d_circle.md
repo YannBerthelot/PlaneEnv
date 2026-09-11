@@ -1,6 +1,6 @@
 # 3D circle
 
-<p align="center"><img src="../videos/plane3d_circle/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/plane3d_circle/pid_output.gif" width="480px"/></p>
 
 3D airplane environment state, parameters, and transition logic.
 

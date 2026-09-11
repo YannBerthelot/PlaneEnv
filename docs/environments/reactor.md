@@ -1,6 +1,6 @@
 # Reactor
 
-<p align="center"><img src="../videos/reactor/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/reactor/pid_output.gif" width="480px"/></p>
 
 Nuclear reactor — point-kinetics with delayed neutrons, xenon poisoning, thermal feedback, and rate-limited control rods.
 

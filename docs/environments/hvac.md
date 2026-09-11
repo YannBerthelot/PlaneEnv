@@ -1,6 +1,6 @@
 # Building HVAC
 
-<p align="center"><img src="../videos/hvac/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/hvac/pid_output.gif" width="480px"/></p>
 
 Building HVAC — single thermal zone, ISO 13790 5R1C reduced-order model.
 

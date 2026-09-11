@@ -88,8 +88,15 @@ dependencies = [
 ]
 
 [project.urls]
+# PyPI renders these as a labelled sidebar and recognises these key names, so
+# "Documentation", "Issues" and "Changelog" get their own icons. Only Homepage
+# and Repository were declared, which sent everyone arriving from
+# ``pip install`` to the repository root to find the docs themselves.
 Homepage = "https://github.com/YannBerthelot/TargetGym"
+Documentation = "https://yannberthelot.github.io/TargetGym/"
 Repository = "https://github.com/YannBerthelot/TargetGym"
+Issues = "https://github.com/YannBerthelot/TargetGym/issues"
+Changelog = "https://github.com/YannBerthelot/TargetGym/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 test = [

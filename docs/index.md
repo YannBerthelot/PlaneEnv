@@ -7,12 +7,12 @@ hide:
 
 <p align="center">
   <b>Reach a setpoint. Hold it forever. Against disturbances.</b><br/>
-  Twenty-two JAX environments for <i>target MDPs</i>, the control problems industry actually has.
+  21 JAX environments for <i>target MDPs</i>, the control problems industry actually has.
 </p>
 
 <p align="center">
   <img src="videos/mosaic_flagship.webp" width="100%"/><br/>
-  <sub>One from each family, held on setpoint by its shipped PID baseline.</sub>
+  <sub>One example task from each family, under PID control.</sub>
 </p>
 
 **21 environments**: 9 aircraft, 5 process control, 5 industrial / energy, 2 renewable energy. Every one of them is in the
@@ -29,21 +29,16 @@ Or try it in the browser: [Colab quickstart](https://colab.research.google.com/g
 ```python
 import jax
 import numpy as np
-from target_gym import Plane, PlaneParams
-from target_gym.registry import REGISTRY
+from target_gym import Plane
 
-env, params = Plane(), PlaneParams()
-obs, state = env.reset(jax.random.PRNGKey(0), params)
-
-# Every environment ships a tuned expert, so a learned policy
-# has something real to beat.
-pid = REGISTRY["plane"].make_pid()
-pid.reset()
+env = Plane()
+pid = env.make_pid()          # the shipped baseline, tuned
+obs, state = env.reset(jax.random.PRNGKey(0))
 
 for t in range(200):
-    action = np.atleast_1d(pid(obs))
+    action = np.atleast_1d(pid(np.asarray(obs)))
     obs, state, reward, terminated, truncated, info = env.step(
-        jax.random.PRNGKey(t), state, action, params
+        jax.random.PRNGKey(t), state, action
     )
     if terminated or truncated:
         break

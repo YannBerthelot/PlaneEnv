@@ -1,6 +1,6 @@
 # Altitude hold
 
-<p align="center"><img src="../videos/plane/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/plane/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|

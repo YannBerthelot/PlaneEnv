@@ -1,6 +1,6 @@
 # Distillation
 
-<p align="center"><img src="../videos/distillation/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/distillation/pid_output.gif" width="480px"/></p>
 
 Binary distillation — Skogestad's "Column A".
 

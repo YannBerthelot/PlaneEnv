@@ -1,6 +1,6 @@
 # Four-tank
 
-<p align="center"><img src="../videos/four_tank/pid_output.gif" width="480px"/></p>
+<p align="center"><img src="../../videos/four_tank/pid_output.gif" width="480px"/></p>
 
 | | |
 |---|---|

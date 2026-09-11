@@ -23,7 +23,7 @@ than by commit.
   and phase lag are the closed loop's frequency response), `plane_energy`
   (altitude and airspeed together, which removes the spare actuator), and
   `plane3d_racetrack` (a holding pattern, which is heading hold and a sustained
-  coordinated turn in one task). Twenty-two in total.
+  coordinated turn in one task). Twenty-one in total.
 - **Environment versioning.** `EnvSpec.version` and `spec.versioned_name` give
   every environment a public identity such as `plane-v1`, stamped in
   `data/env_versions.json` by `scripts/stamp_env_versions.py`.
@@ -68,7 +68,7 @@ than by commit.
   (`target_gym.render_kit`), and the README gallery regenerated and extended to
   every environment.
 - **Seven per-environment figure/video runners consolidated** into one
-  registry-driven module, which covers all twenty-two environments rather than
+  registry-driven module, which covers all twenty-one environments rather than
   eight.
 - The PyPI development status classifier moves from `3 - Alpha` to
   `4 - Beta`. Not a promise of an API freeze, which stays deferred; a statement

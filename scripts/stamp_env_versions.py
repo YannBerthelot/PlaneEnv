@@ -3,7 +3,7 @@
 An environment's version is a promise: a number published against `plane-v1`
 should keep meaning what it meant. That promise is only worth something if
 changing the environment without bumping the version is *caught*, which is what
-`data/env_versions.json` and `tests/test_env_versions.py` are for.
+`src/target_gym/data/env_versions.json` and `tests/test_env_versions.py` are for.
 
 The stamp is `provenance.environment_fingerprint`, which covers the
 environment's own modules, the shared physics and the parameter values, but not
@@ -44,7 +44,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from target_gym.provenance import environment_fingerprint  # noqa: E402
 from target_gym.registry import REGISTRY  # noqa: E402
 
-PATH = ROOT / "data" / "env_versions.json"
+PATH = ROOT / "src" / "target_gym" / "data" / "env_versions.json"
 
 
 def current() -> dict[str, str]:

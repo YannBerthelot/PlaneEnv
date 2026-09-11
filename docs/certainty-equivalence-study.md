@@ -165,7 +165,7 @@ Tuning and caching: MPC hyperparameters are set per environment in the factory
 functions with the reasoning in the docstring, not searched. The caching the
 README mentions is two separate things, neither of which is MPC solution
 caching: an XLA persistent compilation cache in CI, and
-`data/baseline_returns.json`, which stores measured returns so that the
+`src/target_gym/data/baseline_returns.json`, which stores measured returns so that the
 MPC-versus-PID contract is asserted from a recorded number rather than
 reproduced on every test run, guarded by a source fingerprint.
 
@@ -199,7 +199,7 @@ parametric-uncertainty rather than the scenario MPC described in the brief; and
 the NLP grows as `k^n_robust`.
 
 **Cost estimates.** From the recorded per-environment timings in
-`data/baseline_returns.json` (ten seeds, full episodes):
+`src/target_gym/data/baseline_returns.json` (ten seeds, full episodes):
 
 | env | steps/episode | 10 seeds, MPC + PID | implied per MPC solve |
 |---|---|---|---|
@@ -406,5 +406,5 @@ split proposed.
 Nothing was modified. I deliberately did not run the test suite: a full baseline
 re-record was in progress on this machine while this was written, and the fast
 suite would have competed with it for cores. Every claim above is from reading
-source, from `data/baseline_returns.json`, or from short read-only introspection
+source, from `src/target_gym/data/baseline_returns.json`, or from short read-only introspection
 of the registry and the do-mpc version.

@@ -453,7 +453,7 @@ rather than floating:
 | **PID** | **the peer** |
 | MPC | the model-based, full-state upper bound |
 
-These are what `data/baseline_returns.json` records, ten episode seeds each, and
+These are what `src/target_gym/data/baseline_returns.json` records, ten episode seeds each, and
 they are what a learned policy is compared against.
 
 A random-policy floor and a best-constant-action bar were specified here as well

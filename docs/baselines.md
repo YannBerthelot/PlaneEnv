@@ -80,7 +80,7 @@ whose ceiling quietly sees more than its contestants should say so loudly.
 To compare your own agent, write it to the same shape and swap it in. Evaluate
 on the same episode seeds the baselines were recorded on, 0 to 9, which is what
 makes the comparison paired -- and means you can read the baseline numbers out
-of `data/baseline_returns.json` rather than paying to regenerate them.
+of `src/target_gym/data/baseline_returns.json` rather than paying to regenerate them.
 
 The underlying objects are reachable directly if you need them, through
 `spec.make_pid()` and `spec.make_mpc(env, params)`; both are stateful and want
@@ -113,7 +113,7 @@ for the multi-loop plants a MIMO form with a deliberate pairing -- the
 four-tank's loops are **crossed**, because its relative gain array puts
 λ11 at −0.067 and the obvious pairing is unstable.
 
-Gains are tuned by `scripts/tune_pid.py` and cached in `data/pid_gains.json`:
+Gains are tuned by `scripts/tune_pid.py` and cached in `src/target_gym/data/pid_gains.json`:
 
 ```bash
 uv run python scripts/tune_pid.py --envs cstr    # or `make tuning-cstr`
@@ -230,7 +230,7 @@ recording parallelises across seeds.
 **`reset()` between episodes**, or the furnace's bias integrator carries a
 correction into an episode where it is a standing error.
 
-And you may not need to run it at all: `data/baseline_returns.json` holds ten
+And you may not need to run it at all: `src/target_gym/data/baseline_returns.json` holds ten
 seeds of both baselines per environment, on the same episodes an agent is
 evaluated on.
 
@@ -503,7 +503,7 @@ make baselines              # everything, ~40 min
 make baselines-plane        # or one environment
 ```
 
-`scripts/record_baselines.py` writes `data/baseline_returns.json`, and the
+`scripts/record_baselines.py` writes `src/target_gym/data/baseline_returns.json`, and the
 contract is asserted from that. Reading a number rather than producing it makes
 the check *stronger*: it now runs in the fast job on every push and across the
 whole Python matrix, where before it ran once per merge to main on a single
@@ -795,7 +795,7 @@ clean. Hence cross-entropy sampling rather than a gradient method.
 <!-- BEGIN GENERATED BASELINE TABLE -->
 
 <!-- Written by scripts/generate_baseline_table.py from
-     data/baseline_returns.json. Do not edit by hand. -->
+     src/target_gym/data/baseline_returns.json. Do not edit by hand. -->
 
 | environment | steps | PID | MPC | PID share | MPC share | MPC wins | term |
 | --- | --- | --- | --- | --- | --- | --- | --- |

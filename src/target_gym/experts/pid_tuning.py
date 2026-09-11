@@ -1056,12 +1056,12 @@ def tune_plane3d_figure8_pid(
 
 
 # ---------------------------------------------------------------------------
-# Tune all environments and save gains to data/pid_gains.json
+# Tune all environments and save gains to src/target_gym/data/pid_gains.json
 # ---------------------------------------------------------------------------
 
 
 def tune_all_and_save(verbose: bool = True, force: bool = False) -> None:
-    """Run all PID tuning routines and persist the results to data/pid_gains.json.
+    """Run all PID tuning routines and persist the results to src/target_gym/data/pid_gains.json.
 
     Results are saved incrementally after each environment so a crash mid-way
     does not discard completed work.  Pass ``force=True`` to re-tune envs that

@@ -80,7 +80,7 @@ class EnvSpec:
     ----------
     name:
         Registry key.  Matches the runner module prefix and the key used in
-        ``data/pid_gains.json`` where gains are tuned.
+        ``src/target_gym/data/pid_gains.json`` where gains are tuned.
     group:
         One of :data:`GROUPS`.
     env_factory:
@@ -101,7 +101,7 @@ class EnvSpec:
         ``params_cls(**test_params)``.
     tuned_gains_key:
         Key under which this environment's PID gains live in
-        ``data/pid_gains.json``.  ``None`` means the controller is not a
+        ``src/target_gym/data/pid_gains.json``.  ``None`` means the controller is not a
         single flat SISO loop and the gains are stored per sub-loop.
     baselines_note:
         Set when ``make_pid``/``make_mpc`` are ``None``: a short explanation
